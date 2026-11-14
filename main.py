@@ -1,28 +1,29 @@
 import sys
 import trimesh
 
-def analyser_modele_3d(chemin_fichier):
-    print(f"--- Analyse du fichier : {chemin_fichier} ---")
-    
+def analyser_modele_3d(mesh):
+    print("--- Analyse du modèle 3D ---")
     try:
-        # Chargement du modèle 3D (ex: .obj ou .stl)
-        mesh = trimesh.load(chemin_fichier)
-        
-        if isinstance(mesh, trimesh.Scene):
-            mesh = mesh.dump(concatenate=True)
-            
         print(f"Nombre de sommets (points) : {len(mesh.vertices)}")
         print(f"Nombre de faces (triangles) : {len(mesh.faces)}")
         print(f"Modèle étanche (watertight) : {mesh.is_watertight}")
         
+        # Dimensions de la boîte englobante (largeur, hauteur, profondeur)
+        bounds = mesh.extents
+        print(f"Dimensions (X, Y, Z) : {bounds}")
+        
     except Exception as e:
-        print(f"Erreur lors du chargement du fichier 3D : {e}")
+        print(f"Erreur lors de l'analyse : {e}")
 
 def main():
     print("--- Projet Crochet 3D Generator ---")
-    print("Environnement configuré avec succès.")
-    # Exemple d'appel (quand tu auras un fichier 3D de test)
-    # analyser_modele_3d("mon_objet.obj")
+    
+    # Création d'une sphère de test parfaite (rayon de 50 mm)
+    print("Génération d'une sphère 3D virtuelle pour le test...")
+    mesh_sphere = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
+    
+    # On lance l'analyse de cette sphère
+    analyser_modele_3d(mesh_sphere)
 
 if __name__ == "__main__":
     main()
