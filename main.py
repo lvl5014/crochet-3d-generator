@@ -7,12 +7,32 @@ def analyser_modele_3d(mesh):
     print(f"Nombre de faces : {len(mesh.faces)}")
     print(f"Volume : {mesh.volume:.2f} mm³")
     
-    # 1. Découpage en tranches
-    perimetres = decouper_en_tranches(mesh, hauteur_rang=5.0)
+    # 0. Étape de nettoyage géométrique (Nouveau !)
+    mesh_propre = nettoyer_modele_3d(mesh)
+    
+    # 1. Découpage en tranches sur le modèle nettoyé
+    perimetres = decouper_en_tranches(mesh_propre, hauteur_rang=5.0)
     
     # 2. Traduction en mailles de crochet
     if perimetres:
         traduire_en_crochet(perimetres, largeur_maille=8.0)
+
+def nettoyer_modele_3d(mesh):
+    print(f"\n--- Vérification et nettoyage du maillage 3D ---")
+    
+    # Vérification si le maillage est étanche (fermé)
+    if not mesh.is_watertight:
+        print("-> Le modèle n'est pas étanche. Tentative de réparation...")
+        # Remplissage des petits trous
+        mesh.fill_holes()
+    else:
+        print("-> Le modèle est parfaitement étanche (watertight).")
+        
+    # Correction de l'orientation des faces (normales)
+    mesh.fix_normals()
+    
+    print(f"-> Nettoyage terminé.")
+    return mesh
 
 def decouper_en_tranches(mesh, hauteur_rang=5.0):
     print(f"\n--- Début du découpage (hauteur par rang : {hauteur_rang} mm) ---")
@@ -46,9 +66,8 @@ def traduire_en_crochet(perimetres, largeur_maille=8.0):
     dernier_nb_mailles = 0
     
     for i, perimetre in enumerate(perimetres):
-        # On calcule le nombre de mailles nécessaires pour faire le tour de la tranche
         nb_mailles = int(round(perimetre / largeur_maille))
-        nb_mailles = max(nb_mailles, 4) # Minimum 4 mailles pour tenir un cercle
+        nb_mailles = max(nb_mailles, 4)
         
         if i == 0:
             action = "Base / Cercle magique"
