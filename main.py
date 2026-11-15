@@ -2,16 +2,16 @@ import os
 import trimesh
 import numpy as np
 
-def traduire_en_crochet(perimetres, largeur_maille=8.0):
+def traduire_en_crochet(perimetres, hauteur_couche=5.0, largeur_maille=8.0):
     lignes_patron = []
-    lignes_patron.append("--- Génération du patron de crochet ---")
-    lignes_patron.append(f"Taille estimée d'une maille : {largeur_maille} mm\n")
+    lignes_patron.append("--- Génération du patron de crochet (Mode Précis) ---")
+    lignes_patron.append(f"Hauteur d'un rang : {hauteur_couche} mm | Taille estimée d'une maille : {largeur_maille} mm\n")
     
     dernier_nb_mailles = 0
     
     for i, perimetre in enumerate(perimetres):
         nb_mailles = int(round(perimetre / largeur_maille))
-        nb_mailles = max(nb_mailles, 4)
+        nb_mailles = max(nb_mailles, 4) # Minimum 4 mailles pour fermer un cercle magique
         
         if i == 0:
             action = "Base / Cercle magique"
@@ -32,25 +32,27 @@ def traduire_en_crochet(perimetres, largeur_maille=8.0):
     for ligne in lignes_patron:
         print(ligne)
         
-    # Sauvegarde automatique dans un fichier texte/Markdown
+    # Sauvegarde automatique dans le fichier Markdown
     nom_sortie = "patron_crochet.md"
     with open(nom_sortie, "w", encoding="utf-8") as f:
         f.write("\n".join(lignes_patron))
-    print(f"\n[Succès] Patron sauvegardé dans le fichier : {nom_sortie}")
+    print(f"\n[Succès] Patron détaillé sauvegardé dans : {nom_sortie}")
 
 def analyser_modele_3d(mesh):
-    print("\n--- Analyse géométrique 3D ---")
+    print("\n--- Analyse géométrique avancée ---")
     if not mesh.is_watertight:
-        print("Attention : Le modèle n'est pas étanche (watertight). Réparation en cours...")
+        print("Attention : Le modèle n'est pas étanche. Réparation en cours...")
         trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
     else:
         print("Le modèle 3D est propre et étanche.")
         
-    # Slicing le long de l'axe Z pour simuler les rangs de crochet
+    # Slicing de haute précision le long de l'axe Z
     bounds = mesh.bounds
     z_min, z_max = bounds[0][2], bounds[1][2]
-    hauteur_couche = 8.0 # hauteur d'une rangée en mm
+    
+    # On affine la hauteur de couche pour plus de précision sur les formes complexes
+    hauteur_couche = 5.0 
     
     hauteurs = np.arange(z_min + hauteur_couche/2, z_max, hauteur_couche)
     perimetres = []
@@ -64,7 +66,7 @@ def analyser_modele_3d(mesh):
             perimetres.append(0.0)
             
     if len(perimetres) > 0:
-        traduire_en_crochet(perimetres)
+        traduire_en_crochet(perimetres, hauteur_couche=hauteur_couche)
     else:
         print("Erreur : Impossible de découper le modèle.")
 
