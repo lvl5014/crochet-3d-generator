@@ -127,7 +127,7 @@ def generer_donnees_partie(nom_partie, sub_mesh):
         "tranches_couleurs": tranches_couleurs
     }
 
-def compiler_master_document(parties_donnees, guide_texte, mesh):
+def compiler_master_document(parties_donnees, mesh):
     vertices_json = json.dumps(mesh.vertices.tolist())
     faces_json = json.dumps(mesh.faces.tolist())
     parties_json = json.dumps(parties_donnees)
@@ -136,7 +136,7 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Patron Amigurumi Pro - Chronoplanificateur Intégré</title>
+    <title>Patron Amigurumi Pro - Épinglage 3D & Nomenclature</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
@@ -153,6 +153,9 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
 
         .timer-banner {{ background: #27ae60; color: white; padding: 15px; border-radius: 8px; text-align: center; font-size: 17px; font-weight: bold; margin: 20px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
 
+        .blueprint-container {{ background: #eef9f2; border: 2px solid #27ae60; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+        .blueprint-container h3 {{ color: #27ae60; margin-top: 0; }}
+
         .viewer-container {{ background: #1a1a1a; border: 2px solid #3498db; border-radius: 8px; margin: 25px 0; padding: 10px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }}
         #webgl-container {{ width: 100%; height: 350px; border-radius: 6px; overflow: hidden; }}
         .viewer-title {{ color: #fff; font-size: 15px; margin-bottom: 8px; font-weight: bold; }}
@@ -162,6 +165,8 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
         .row-label {{ width: 110px; font-size: 13px; font-weight: bold; color: #555; }}
         .stitch-cell {{ width: 16px; height: 16px; display: inline-block; margin: 1px; border: 1px solid #bbb; border-radius: 3px; }}
         
+        .tapestry-tip {{ background: #fdf2e9; border: 1px solid #f39c12; padding: 10px 15px; border-radius: 5px; margin: 10px 0; font-size: 13px; color: #d35400; }}
+
         .color-widget {{ background: #eef2f7; border: 2px dashed #3498db; padding: 15px; border-radius: 8px; text-align: center; margin: 25px 0; }}
         .color-widget input {{ padding: 8px; width: 260px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 15px; }}
         
@@ -215,6 +220,14 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
         ⏱️ Temps de crochet estimé : Calcul en cours...
     </div>
 
+    <!-- Plan de Marquage et d'Épinglage 3D Dynamique -->
+    <div class="blueprint-container">
+        <h3>📍 Plan d'Assemblage & Épinglage 3D Chirurgical</h3>
+        <ul id="blueprintList">
+            <li>Calcul des repères d'assemblage en cours...</li>
+        </ul>
+    </div>
+
     <div class="viewer-container">
         <div class="viewer-title">🌐 Visualiseur 3D Interactif (Glissez pour pivoter, molette pour zoomer)</div>
         <div id="webgl-container"></div>
@@ -234,7 +247,6 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
         const verticesData = {vertices_json};
         const facesData = {faces_json};
         const partiesData = {parties_json};
-        const guideTexte = `{guide_texte}`;
 
         function genererInstructionOptimisee(ancienNb, nouveauNb) {{
             let diff = nouveauNb - ancienNb;
@@ -258,6 +270,25 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
             }}
         }}
 
+        function analyserTapestrySequence(paletteTranche) {{
+            if (!paletteTranche || paletteTranche.length === 0) return "Fil continu unicolore - Aucune contrainte Tapestry.";
+            let maxConsecutif = 1;
+            let courant = 1;
+            for (let i = 1; i < paletteTranche.length; i++) {{
+                if (paletteTranche[i][0] === paletteTranche[i-1][0]) {{
+                    courant++;
+                    if (courant > maxConsecutif) maxConsecutif = courant;
+                }} else {{
+                    courant = 1;
+                }}
+            }}
+            if (maxConsecutif > 5) {{
+                return `💡 <b>Conseil Tapestry</b> : Séquence longue détectée (${{maxConsecutif}} mailles d'affilée). Utilisez la technique du <i>fil flottant sur l'envers</i> pour ne pas alourdir l'ouvrage.`;
+            }} else {{
+                return `💡 <b>Conseil Tapestry</b> : Alternance rapide. Emprisonnez (emportez) le fil inactif à l'intérieur des mailles.`;
+            }}
+        }}
+
         function mettreAJourPatron() {{
             let hookSize = parseFloat(document.getElementById('hookSize').value);
             let yarnVal = document.getElementById('yarnType').value;
@@ -274,7 +305,8 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
             let largeurMaille = (hookSize * 2.2) * (yarnMultiplier * 0.9); 
             let hauteurCouche = (hookSize * 0.6) * yarnMultiplier;
 
-            let htmlFinal = "<h2>🗺️ Guide d'assemblage et de cartographie spatiale</h2>" + guideTexte + "<hr>";
+            let htmlFinal = "<h2>🗺️ Guide d'assemblage et de cartographie spatiale</h2><hr>";
+            let blueprintHTML = "";
             let grandTotalMailles = 0;
 
             partiesData.forEach(partie => {{
@@ -317,6 +349,21 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
                 let hauteurEstimeeMM = nbRangs * hauteurCouche;
                 let filEstimeMetres = (totalMaillesPartie * (hookSize * 4.5 * yarnMultiplier)) / 1000.0;
                 let pelotes = Math.max(1, Math.ceil(filEstimeMetres / 75.0));
+                let tapestryAdvice = analyserTapestrySequence(partie.tranches_couleurs[0]);
+
+                // Génération intelligente du plan de marquage selon la partie
+                let nomP = partie.nom.toLowerCase();
+                if(nomP.includes('tete') || nomP.includes('head')) {{
+                    blueprintHTML += `<li><b>TÊTE</b> : À fixer sur le sommet du CORPS entre les rangs supérieurs (épingler solidement avant couture circulaire).</li>`;
+                }} else if(nomP.includes('corps') || nomP.includes('body')) {{
+                    blueprintHTML += `<li><b>CORPS</b> : Base centrale de l'amigurumi. Insérer l'armature et le rembourrage avant de fermer le sommet.</li>`;
+                }} else if(nomP.includes('jambe') || nomP.includes('leg')) {{
+                    blueprintHTML += `<li><b>JAMBES / MEMBRES</b> : À positionner symétriquement de part et d'autre de la base du CORPS (aligner horizontalement avec des épingles).</li>`;
+                }} else if(nomP.includes('chapeau') || nomP.includes('casquette')) {{
+                    blueprintHTML += `<li><b>ACCESSOIRE (Chapeau)</b> : À poser et coudre en couronne sur le sommet de la TÊTE au niveau des 3 derniers rangs.</li>`;
+                }} else {{
+                    blueprintHTML += `<li><b>${{partie.nom.toUpperCase()}}</b> : À coudre sur la zone avant/latérale selon la symétrie 3D.</li>`;
+                }}
 
                 htmlFinal += `<div class='part-container'>`;
                 htmlFinal += `<h2>🧶 Partie : ${{partie.nom.toUpperCase()}}</h2>`;
@@ -327,10 +374,13 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
                 htmlFinal += `<li><b>Fil estimé</b> : ~${{filEstimeMetres.toFixed(1)}}m (~${{pelotes}} pelote(s)) | <b>Ouate</b> : ~${{partie.poids_ouate.toFixed(1)}}g</li>`;
                 if(partie.armature) htmlFinal += `<li><b>Armature</b> : ⚠️ Fil de fer conseillé.</li>`;
                 htmlFinal += `</ul>`;
+                htmlFinal += `<div class='tapestry-tip'>${{tapestryAdvice}}</div>`;
                 htmlFinal += `<div class='jacquard-container'><h4>📊 Grille Visuelle & Références Fils (${{partie.nom.toUpperCase()}})</h4>` + grillesHTML.join('') + `</div>`;
                 htmlFinal += `<h3>🧵 Instructions et Grille Jacquard :</h3><ul>` + instructions.join('') + `</ul>`;
                 htmlFinal += `</div>`;
             }});
+
+            document.getElementById('blueprintList').innerHTML = blueprintHTML;
 
             let totalSeconds = grandTotalMailles * secondsPerStitch;
             let totalHours = Math.floor(totalSeconds / 3600);
@@ -428,7 +478,7 @@ def compiler_master_document(parties_donnees, guide_texte, mesh):
 """
     with open("patron_global_ultime.html", "w", encoding="utf-8") as f:
         f.write(html_content)
-    print("[Succès] Export HTML corrigé et généré avec succès !")
+    print("[Succès] Export HTML avec plan de marquage et épinglage 3D généré !")
 
 def extraire_tranches_mesh_avancees(sub_mesh):
     bounds = sub_mesh.bounds
@@ -445,7 +495,7 @@ def extraire_tranches_mesh_avancees(sub_mesh):
     return perimetres, hauteurs
 
 def scanner_details_et_zones(mesh):
-    print(f"\n--- Scanner intelligent & Chronoplanificateur ---")
+    print(f"\n--- Scanner intelligent & Plan d'Épinglage 3D ---")
     if not mesh.is_watertight:
         trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
@@ -489,11 +539,7 @@ def scanner_details_et_zones(mesh):
             if pdata: parties_donnees.append(pdata)
             details_trouves.append("detail_chapeau_casquette")
 
-    guide_texte = "<ul>"
-    if "detail_chapeau_casquette" in details_trouves: guide_texte += "<li><b>Chapeau / Casquette</b> : À positionner au sommet de la tête.</li>"
-    guide_texte += "<li><b>Membres / Corps</b> : À assembler selon la morphologie globale.</li></ul><blockquote>💡 <b>Astuce</b> : Épingle toutes les pièces avant la couture définitive.</blockquote>"
-
-    compiler_master_document(parties_donnees, guide_texte, mesh)
+    compiler_master_document(parties_donnees, mesh)
 
 def main():
     nom_fichier = "mario_ia_genere.obj" if os.path.exists("mario_ia_genere.obj") else "mario.stl"
