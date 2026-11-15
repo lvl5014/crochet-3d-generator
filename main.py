@@ -1,35 +1,55 @@
 import os
+import json
 import trimesh
 import numpy as np
 
 # ==========================================
-# 🧶 CONFIGURATION DU MATÉRIEL (CALIBRAGE)
+# 🧶 CONFIGURATION PAR DÉFAUT
 # ==========================================
-CROCHET_TAILLE = "3.5 mm"
-TYPE_FIL = "Coton classique (Sport / DK)"
-LARGEUR_MAILLE_MM = 8.0
-HAUTEUR_COUCHE_MM = 2.0
+CROCHET_DEFAUT = 3.5
+LAINE_DEFAUT = "sport"
+
+CATALOGUE_FILS_REELS = [
+    {"ref": "04", "nom": "True Red", "rgb": [215, 38, 56], "hex": "#d72638"},
+    {"ref": "88", "nom": "Royal Blue", "rgb": [30, 100, 200], "hex": "#1e64c8"},
+    {"ref": "01", "nom": "White", "rgb": [245, 245, 245], "hex": "#f5f5f5"},
+    {"ref": "12", "nom": "Black", "rgb": [30, 30, 30], "hex": "#1e1e1e"},
+    {"ref": "42", "nom": "Beige / Peau", "rgb": [235, 185, 150], "hex": "#ebb996"},
+    {"ref": "73", "nom": "Green", "rgb": [40, 160, 80], "hex": "#28a050"},
+    {"ref": "30", "nom": "Yellow", "rgb": [245, 210, 50], "hex": "#f5d232"}
+]
 # ==========================================
 
-def classifier_couleur(rgb):
-    r, g, b = int(rgb[0]), int(rgb[1]), int(rgb[2])
-    if r > 150 and g < 100 and b < 100: return "Rouge"
-    elif r < 100 and g < 100 and b > 150: return "Bleu"
-    elif r < 100 and g > 150 and b < 100: return "Vert"
-    elif r > 200 and g > 200 and b > 200: return "Blanc"
-    elif r < 50 and g < 50 and b < 50: return "Noir"
-    elif r > 180 and g > 130 and b < 120: return "Peau"
-    return f"RGB({r},{g},{b})"
+def rgb_vers_hex(rgb):
+    return "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
-def detecter_couleurs_jacquard_tranche(sub_mesh, z_hauteur):
+def trouver_fil_reel_le_plus_proche(rgb_cible):
+    r_c, g_c, b_c = rgb_cible[0], rgb_cible[1], rgb_cible[2]
+    meilleur_match = CATALOGUE_FILS_REELS[0]
+    min_distance = float('inf')
+
+    for fil in CATALOGUE_FILS_REELS:
+        fr, fg, fb = fil["rgb"]
+        dist = np.sqrt((r_c - fr)**2 + (g_c - fg)**2 + (b_c - fb)**2)
+        if dist < min_distance:
+            min_distance = dist
+            meilleur_match = fil
+
+    if min_distance > 40:
+        hex_c = rgb_vers_hex(rgb_cible)
+        return f"Nuance RGB({int(r_c)},{int(g_c)},{int(b_c)})", hex_c
+    
+    return f"{meilleur_match['nom']} (Hobbii {meilleur_match['ref']})", meilleur_match["hex"]
+
+def extraire_couleurs_mailles_par_maille(sub_mesh, z_hauteur, nb_mailles):
     if not hasattr(sub_mesh.visual, 'vertex_colors') and not hasattr(sub_mesh.visual, 'face_colors'):
-        return "100% Couleur unie"
+        return [("#1e64c8", "Royal Blue")] * nb_mailles
 
     face_centers = sub_mesh.triangles_center
-    masque_tranche = np.abs(face_centers[:, 2] - z_hauteur) <= (HAUTEUR_COUCHE_MM / 2.0)
+    masque_tranche = np.abs(face_centers[:, 2] - z_hauteur) <= 1.0
     
     if not np.any(masque_tranche):
-        return "Travailler tout droit"
+        return [("#1e64c8", "Royal Blue")] * nb_mailles
 
     colors = None
     if hasattr(sub_mesh.visual, 'face_colors') and sub_mesh.visual.face_colors is not None:
@@ -38,29 +58,26 @@ def detecter_couleurs_jacquard_tranche(sub_mesh, z_hauteur):
         colors = sub_mesh.visual.vertex_colors[:len(masque_tranche)]
 
     if colors is None or len(colors) == 0:
-        return "100% Couleur unie"
+        return [("#1e64c8", "Royal Blue")] * nb_mailles
 
     centres_sec = face_centers[masque_tranche]
-    x, y = centres_sec[:, 0], centres_sec[:, 1]
+    angles_faces = np.arctan2(centres_sec[:, 1], centres_sec[:, 0])
     
-    quadrants = {
-        "Avant": colors[(y > 0) & (np.abs(x) >= np.abs(y))],
-        "Arrière": colors[(y < 0) & (np.abs(x) >= np.abs(y))],
-        "Droite": colors[(x > 0) & (np.abs(y) > np.abs(x))],
-        "Gauche": colors[(x < 0) & (np.abs(y) > np.abs(x))]
-    }
-
-    changements = []
-    for zone, col_arr in quadrants.items():
-        if len(col_arr) > 0:
-            moy = np.mean(col_arr[:, :3], axis=0)
-            nom_c = classifier_couleur(moy)
-            changements.append(f"{nom_c} ({zone})")
-
-    if len(set(changements)) <= 1:
-        return "100% Couleur unie"
-    else:
-        return "Multicolore / Jacquard : " + " | ".join(set(changements))
+    couleurs_mailles = []
+    for k in range(nb_mailles):
+        angle_cible = -np.pi + (k * 2.0 * np.pi / nb_mailles)
+        delta_angles = np.abs(angles_faces - angle_cible)
+        indices_proches = np.where(delta_angles < (np.pi / nb_mailles))[0]
+        
+        if len(indices_proches) > 0:
+            moy_rgb = np.mean(colors[indices_proches][:, :3], axis=0)
+        else:
+            moy_rgb = np.mean(colors[:, :3], axis=0)
+            
+        nom_fil, hex_c = trouver_fil_reel_le_plus_proche(moy_rgb)
+        couleurs_mailles.append((hex_c, nom_fil))
+        
+    return couleurs_mailles
 
 def calculer_simulation_physique(sub_mesh):
     try:
@@ -75,238 +92,415 @@ def calculer_simulation_physique(sub_mesh):
     besoin_armature = (largeur < 15.0 or profondeur < 15.0) and hauteur > 20.0
     return volume_cm3, poids_ouate_g, besoin_armature
 
-def formater_instruction_amigurumi_jacquard(i, nb_mailles, dernier_nb_mailles, sub_mesh, z_val):
-    if i == 0:
-        return f"* **R{i+1}** : Cercle magique de **{nb_mailles} ms** (mailles serrées)"
-    
-    diff = nb_mailles - dernier_nb_mailles
-    action_base = ""
-    if diff > 0:
-        if diff == dernier_nb_mailles:
-            action_base = f"[1 ms, 1 aug] répéter {dernier_nb_mailles} fois"
-        else:
-            action_base = f"ms avec {diff} aug réparties"
-    elif diff < 0:
-        action_base = f"ms avec {abs(diff)} dim réparties"
-    else:
-        action_base = "1 ms dans chaque maille (tout droit)"
-
-    detail_jacquard = detecter_couleurs_jacquard_tranche(sub_mesh, z_val)
-    return f"* **R{i+1}** : {action_base} (**{nb_mailles} ms**) — *Note Jacquard : {detail_jacquard}*"
-
-def generer_patron_partie(nom_partie, perimetres_tranches, hauteurs_z, sub_mesh=None):
-    if len(perimetres_tranches) == 0 or max(perimetres_tranches) == 0:
+def generer_donnees_partie(nom_partie, sub_mesh):
+    if sub_mesh is None or sub_mesh.is_empty:
         return None
         
+    bounds = sub_mesh.bounds
+    z_min, z_max = bounds[0][2], bounds[1][2]
+    hauteur_totale = z_max - z_min
+    if hauteur_totale <= 0: hauteur_totale = 10.0
+
+    vol_cm3, poids_ouate, armature = calculer_simulation_physique(sub_mesh)
+    
     couleur_partie = "Standard"
-    if sub_mesh is not None:
-        colors = sub_mesh.visual.vertex_colors if hasattr(sub_mesh.visual, 'vertex_colors') else getattr(sub_mesh.visual, 'face_colors', None)
-        if colors is not None and len(colors) > 0:
-            couleur_partie = classifier_couleur(np.mean(colors[:, :3], axis=0))
+    colors = sub_mesh.visual.vertex_colors if hasattr(sub_mesh.visual, 'vertex_colors') else getattr(sub_mesh.visual, 'face_colors', None)
+    if colors is not None and len(colors) > 0:
+        nom_fil, _ = trouver_fil_reel_le_plus_proche(np.mean(colors[:, :3], axis=0))
+        couleur_partie = nom_fil
 
-    vol_cm3, poids_ouate, armature = calculer_simulation_physique(sub_mesh) if sub_mesh else (10.0, 0.5, False)
+    hauteurs_tranches = np.arange(z_min + 1.0, z_max, 2.0)
+    tranches_couleurs = []
+    for z in hauteurs_tranches:
+        c_mailles = extraire_couleurs_mailles_par_maille(sub_mesh, z, 12)
+        tranches_couleurs.append(c_mailles)
 
-    lignes_patron = []
-    lignes_patron.append(f"## 🧶 Partie : {nom_partie.upper()}\n")
-    
-    nb_rangs = len(perimetres_tranches)
-    hauteur_finale_mm = nb_rangs * HAUTEUR_COUCHE_MM
-    
-    total_mailles = 0
-    instructions_rangs = []
-    dernier_nb_mailles = 0
-    
-    for i, (perimetre, z_val) in enumerate(zip(perimetres_tranches, hauteurs_z)):
-        nb_mailles = int(round(perimetre / LARGEUR_MAILLE_MM))
-        nb_mailles = max(nb_mailles, 4)
-        total_mailles += nb_mailles
-        
-        instruction_ligne = formater_instruction_amigurumi_jacquard(i, nb_mailles, dernier_nb_mailles, sub_mesh, z_val)
-        instructions_rangs.append(instruction_ligne)
-        dernier_nb_mailles = nb_mailles
+    return {
+        "nom": nom_partie,
+        "z_min": float(z_min),
+        "z_max": float(z_max),
+        "hauteur_totale": float(hauteur_totale),
+        "vol_cm3": float(vol_cm3),
+        "poids_ouate": float(poids_ouate),
+        "armature": bool(armature),
+        "couleur_partie": couleur_partie,
+        "tranches_couleurs": tranches_couleurs
+    }
 
-    fil_estime_metres = (total_mailles * 15.0) / 1000.0
-
-    lignes_patron.append("### 📋 Spécifications :")
-    lignes_patron.append(f"- **Couleur principale** : 🎨 {couleur_partie}")
-    lignes_patron.append(f"- **Hauteur estimée** : {hauteur_finale_mm:.1f} mm ({hauteur_finale_mm / 10.0:.1f} cm)")
-    lignes_patron.append(f"- **Rangs** : {nb_rangs} | **Fil estimé** : ~{fil_estime_metres:.1f}m | **Ouate** : ~{poids_ouate:.1f}g")
-    if armature:
-        lignes_patron.append(f"- **Armature** : ⚠️ Fil de fer conseillé.")
-    lignes_patron.append("\n### 🧵 Instructions :")
-    lignes_patron.extend(instructions_rangs)
-    lignes_patron.append("\n---")
+def compiler_master_document(parties_donnees, guide_texte, mesh):
+    vertices_json = json.dumps(mesh.vertices.tolist())
+    faces_json = json.dumps(mesh.faces.tolist())
+    parties_json = json.dumps(parties_donnees)
     
-    contenu_texte = "\n".join(lignes_patron)
-    
-    # Sauvegarde individuelle également
-    with open(f"patron_{nom_partie}.md", "w", encoding="utf-8") as f:
-        f.write(contenu_texte)
-        
-    return contenu_texte
-
-def compiler_master_document(toutes_les_parties, guide_texte):
-    """Compile tout dans un document maître Markdown et HTML prêt pour impression PDF"""
-    master_md = []
-    master_md.append("# 🌟 PATRON GLOBAL AMIGURUMI - MASTER PRO 🌟\n")
-    master_md.append(f"> **Matériel de référence** : Crochet {CROCHET_TAILLE} | Fil : {TYPE_FIL}\n")
-    master_md.append("---")
-    master_md.append(guide_texte)
-    master_md.append("\n---")
-    master_md.extend(toutes_les_parties)
-    
-    # 1. Écriture du Markdown Global
-    with open("patron_global_ultime.md", "w", encoding="utf-8") as f:
-        f.write("\n".join(master_md))
-        
-    # 2. Génération d'un fichier HTML stylisé pour conversion PDF instantanée
     html_content = f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Patron Amigurumi Pro - Ultimate Edition</title>
+    <title>Patron Amigurumi Pro - Chronoplanificateur Intégré</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
-        body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; line-height: 1.6; }}
+        body {{ font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 20px; color: #333; line-height: 1.6; background-color: #fdfdfd; }}
         h1 {{ color: #2c3e50; text-align: center; border-bottom: 3px solid #3498db; padding-bottom: 15px; }}
         h2 {{ color: #e74c3c; border-bottom: 2px solid #bdc3c7; padding-top: 20px; }}
         h3 {{ color: #2980b9; }}
         blockquote {{ background: #f8f9fa; border-left: 5px solid #3498db; margin: 20px 0; padding: 15px; }}
         ul {{ list-style-type: disc; padding-left: 20px; }}
         li {{ margin-bottom: 6px; }}
-        .no-print {{ text-align: center; margin: 30px 0; }}
-        .btn {{ background: #e74c3c; color: white; padding: 12px 25px; text-decoration: none; font-weight: bold; border-radius: 5px; display: inline-block; cursor: pointer; }}
-        @media print {{ .no-print {{ display: none; }} body {{ margin: 10px; }} }}
+        
+        .config-panel {{ background: #e8f4fc; border: 2px solid #3498db; padding: 20px; border-radius: 8px; margin: 20px 0; display: flex; justify-content: space-around; flex-wrap: wrap; gap: 15px; text-align: center; font-weight: bold; }}
+        .config-group select {{ padding: 8px 12px; font-size: 15px; border-radius: 5px; border: 1px solid #3498db; background: white; cursor: pointer; margin-top: 5px; display: block; }}
+
+        .timer-banner {{ background: #27ae60; color: white; padding: 15px; border-radius: 8px; text-align: center; font-size: 17px; font-weight: bold; margin: 20px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+
+        .viewer-container {{ background: #1a1a1a; border: 2px solid #3498db; border-radius: 8px; margin: 25px 0; padding: 10px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }}
+        #webgl-container {{ width: 100%; height: 350px; border-radius: 6px; overflow: hidden; }}
+        .viewer-title {{ color: #fff; font-size: 15px; margin-bottom: 8px; font-weight: bold; }}
+
+        .part-container {{ background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }}
+        .row-chart {{ display: flex; align-items: center; margin: 4px 0; flex-wrap: wrap; }}
+        .row-label {{ width: 110px; font-size: 13px; font-weight: bold; color: #555; }}
+        .stitch-cell {{ width: 16px; height: 16px; display: inline-block; margin: 1px; border: 1px solid #bbb; border-radius: 3px; }}
+        
+        .color-widget {{ background: #eef2f7; border: 2px dashed #3498db; padding: 15px; border-radius: 8px; text-align: center; margin: 25px 0; }}
+        .color-widget input {{ padding: 8px; width: 260px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 15px; }}
+        
+        .no-print {{ text-align: center; margin: 20px 0; }}
+        .btn {{ background: #e74c3c; color: white; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 5px; display: inline-block; cursor: pointer; border: none; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .btn:hover {{ background: #c0392b; }}
+        @media print {{ .no-print, .color-widget, .viewer-container, .config-panel, .timer-banner {{ display: none; }} body {{ margin: 10px; background: white; }} }}
     </style>
 </head>
 <body>
     <div class="no-print">
         <button class="btn" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer le Patron</button>
     </div>
-    <h1>🌟 Patron Global Amigurumi - Master Pro 🌟</h1>
-    <p style="text-align: center;"><strong>Matériel :</strong> Crochet {CROCHET_TAILLE} | <strong>Fil :</strong> {TYPE_FIL}</p>
-    <hr>
-"""
-    # Conversion basique des blocs Markdown pour l'affichage HTML propre
-    corps_html = "\n".join(master_md).replace("# 🌟 ", "<h1>").replace("## 🧶 ", "<h2>").replace("### ", "<h3>").replace("* **", "<li><b>").replace("** : ", "</b> : ")
-    html_content += f"<div>{corps_html}</div></body></html>"
     
+    <h1>🌟 Patron Global Amigurumi - Master Pro 🌟</h1>
+    
+    <div class="config-panel">
+        <div class="config-group">
+            <label for="hookSize">🧶 Taille du Crochet :</label>
+            <select id="hookSize" onchange="mettreAJourPatron()">
+                <option value="2.0">Crochet 2.0 mm (Mini)</option>
+                <option value="2.5">Crochet 2.5 mm (Fin)</option>
+                <option value="3.0">Crochet 3.0 mm (Standard fin)</option>
+                <option value="3.5" selected>Crochet 3.5 mm (Standard)</option>
+                <option value="4.0">Crochet 4.0 mm (Moyen)</option>
+                <option value="4.5">Crochet 4.5 mm (Large)</option>
+                <option value="5.0">Crochet 5.0 mm (Gros fil)</option>
+            </select>
+        </div>
+        <div class="config-group">
+            <label for="yarnType">🧵 Type de Laine / Fil :</label>
+            <select id="yarnType" onchange="mettreAJourPatron()">
+                <option value="lace">Lace / Fingering (Très fin)</option>
+                <option value="sport" selected>Coton Sport / DK (Standard)</option>
+                <option value="worsted">Aran / Worsted (Épais)</option>
+                <option value="bulky">Bulky / Chunky (Très épais)</option>
+                <option value="velvet">Chenille / Velvet (Effet peluche)</option>
+            </select>
+        </div>
+        <div class="config-group">
+            <label for="speedLevel">⏱️ Vitesse de Crochet :</label>
+            <select id="speedLevel" onchange="mettreAJourPatron()">
+                <option value="12">Débutant (12s / maille)</option>
+                <option value="8" selected>Intermédiaire (8s / maille)</option>
+                <option value="5">Expert / Rapide (5s / maille)</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="timer-banner" id="timerBanner">
+        ⏱️ Temps de crochet estimé : Calcul en cours...
+    </div>
+
+    <div class="viewer-container">
+        <div class="viewer-title">🌐 Visualiseur 3D Interactif (Glissez pour pivoter, molette pour zoomer)</div>
+        <div id="webgl-container"></div>
+    </div>
+
+    <div class="color-widget">
+        <h3>🎨 Encyclopédie & Testeur RGB Universel</h3>
+        <p>Tapez un nom (ex: <i>rouge</i>, <i>beige</i>) ou un code RGB (ex: <i>234, 172, 121</i>) :</p>
+        <input type="text" id="colorInput" placeholder="Ex: rouge ou 234,172,121">
+        <button class="btn" style="padding: 8px 15px; margin-left: 10px; background: #3498db;" onclick="chercherCouleur()">Rechercher</button>
+        <div id="colorResult" style="margin-top: 10px; font-weight: bold; font-size: 15px;"></div>
+    </div>
+
+    <div id="contenu-patron"></div>
+
+    <script>
+        const verticesData = {vertices_json};
+        const facesData = {faces_json};
+        const partiesData = {parties_json};
+        const guideTexte = `{guide_texte}`;
+
+        function genererInstructionOptimisee(ancienNb, nouveauNb) {{
+            let diff = nouveauNb - ancienNb;
+            if (diff === 0) return "1 ms dans chaque maille (tout droit)";
+            if (ancienNb === 0) return `Cercle magique de <b>${{nouveauNb}} ms</b>`;
+
+            if (diff > 0) {{
+                let augs = diff;
+                let base = Math.floor(ancienNb / augs);
+                let reste = ancienNb % augs;
+                if (base === 0) return `[1 aug] x ${{nouveauNb}} (<b>${{nouveauNb}} ms</b>)`;
+                if (reste === 0) return `[${{base}} ms, 1 aug] x ${{augs}} (<b>${{nouveauNb}} ms</b>)`;
+                return `[${{base+1}} ms, 1 aug] x ${{reste}}, [${{base}} ms, 1 aug] x ${{augs-reste}} (<b>${{nouveauNb}} ms</b>)`;
+            }} else {{
+                let dims = Math.abs(diff);
+                let base = Math.floor(ancienNb / dims);
+                let reste = ancienNb % dims;
+                if (base <= 1) return `[1 dim] x ${{dims}} (<b>${{nouveauNb}} ms</b>)`;
+                if (reste === 0) return `[${{base-1}} ms, 1 dim] x ${{dims}} (<b>${{nouveauNb}} ms</b>)`;
+                return `[${{base}} ms, 1 dim] x ${{reste}}, [${{base-1}} ms, 1 dim] x ${{dims-reste}} (<b>${{nouveauNb}} ms</b>)`;
+            }}
+        }}
+
+        function mettreAJourPatron() {{
+            let hookSize = parseFloat(document.getElementById('hookSize').value);
+            let yarnVal = document.getElementById('yarnType').value;
+            let secondsPerStitch = parseFloat(document.getElementById('speedLevel').value);
+            
+            let yarnMultiplier = 1.0;
+            let nomLaineTexte = "Coton Sport / DK";
+            if(yarnVal === 'lace') {{ yarnMultiplier = 0.8; nomLaineTexte = "Lace / Fingering"; }}
+            else if(yarnVal === 'sport') {{ yarnMultiplier = 1.0; nomLaineTexte = "Coton Sport / DK"; }}
+            else if(yarnVal === 'worsted') {{ yarnMultiplier = 1.3; nomLaineTexte = "Aran / Worsted"; }}
+            else if(yarnVal === 'bulky') {{ yarnMultiplier = 1.6; nomLaineTexte = "Bulky / Chunky"; }}
+            else if(yarnVal === 'velvet') {{ yarnMultiplier = 2.0; nomLaineTexte = "Chenille / Velvet (Peluche)"; }}
+
+            let largeurMaille = (hookSize * 2.2) * (yarnMultiplier * 0.9); 
+            let hauteurCouche = (hookSize * 0.6) * yarnMultiplier;
+
+            let htmlFinal = "<h2>🗺️ Guide d'assemblage et de cartographie spatiale</h2>" + guideTexte + "<hr>";
+            let grandTotalMailles = 0;
+
+            partiesData.forEach(partie => {{
+                let nbRangs = Math.max(4, Math.round(partie.hauteur_totale / hauteurCouche));
+                let diametreMoyenMM = (partie.z_max - partie.z_min) * 0.8;
+                if(diametreMoyenMM < 10) diametreMoyenMM = 20;
+
+                let instructions = [];
+                let grillesHTML = [];
+                let dernierMailles = 0;
+                let totalMaillesPartie = 0;
+
+                for(let i = 0; i < nbRangs; i++) {{
+                    let facteurForme = Math.sin((i / nbRangs) * Math.PI);
+                    if(facteurForme < 0.2) facteurForme = 0.2;
+                    let nbMailles = Math.max(4, Math.round((diametreMoyenMM * facteurForme * Math.PI) / largeurMaille));
+                    totalMaillesPartie += nbMailles;
+
+                    let actionTexte = (i === 0) ? `Cercle magique de <b>${{nbMailles}} ms</b>` : genererInstructionOptimisee(dernierMailles, nbMailles);
+
+                    let couleurIndex = i % partie.tranches_couleurs.length;
+                    let paletteTranche = partie.tranches_couleurs[couleurIndex] || [["#3498db", "Blue"]];
+
+                    let rowChart = `<div class='row-chart'><span class='row-label'>R${{i+1}} (${{nbMailles}}m) :</span>`;
+                    for(let k = 0; k < nbMailles; k++) {{
+                        let colorInfo = paletteTranche[k % paletteTranche.length];
+                        let hexC = colorInfo[0];
+                        let nomF = colorInfo[1];
+                        rowChart += `<span class='stitch-cell' style='background-color: ${{hexC}};' title='${{nomF}}'></span>`;
+                    }}
+                    rowChart += `</div>`;
+                    grillesHTML.push(rowChart);
+
+                    instructions.push(`<li><b>R${{i+1}}</b> : ${{actionTexte}}</li>`);
+                    dernierMailles = nbMailles;
+                }}
+
+                grandTotalMailles += totalMaillesPartie;
+
+                let hauteurEstimeeMM = nbRangs * hauteurCouche;
+                let filEstimeMetres = (totalMaillesPartie * (hookSize * 4.5 * yarnMultiplier)) / 1000.0;
+                let pelotes = Math.max(1, Math.ceil(filEstimeMetres / 75.0));
+
+                htmlFinal += `<div class='part-container'>`;
+                htmlFinal += `<h2>🧶 Partie : ${{partie.nom.toUpperCase()}}</h2>`;
+                htmlFinal += `<h3>📋 Spécifications & Fournitures (Crochet ${{hookSize}}mm | ${{nomLaineTexte}}) :</h3>`;
+                htmlFinal += `<ul>`;
+                htmlFinal += `<li><b>Fil recommandé</b> : 🎨 ${{partie.couleur_partie}}</li>`;
+                htmlFinal += `<li><b>Hauteur estimée</b> : ${{hauteurEstimeeMM.toFixed(1)}} mm (${{(hauteurEstimeeMM/10.0).toFixed(1)}} cm)</li>`;
+                htmlFinal += `<li><b>Fil estimé</b> : ~${{filEstimeMetres.toFixed(1)}}m (~${{pelotes}} pelote(s)) | <b>Ouate</b> : ~${{partie.poids_ouate.toFixed(1)}}g</li>`;
+                if(partie.armature) htmlFinal += `<li><b>Armature</b> : ⚠️ Fil de fer conseillé.</li>`;
+                htmlFinal += `</ul>`;
+                htmlFinal += `<div class='jacquard-container'><h4>📊 Grille Visuelle & Références Fils (${{partie.nom.toUpperCase()}})</h4>` + grillesHTML.join('') + `</div>`;
+                htmlFinal += `<h3>🧵 Instructions et Grille Jacquard :</h3><ul>` + instructions.join('') + `</ul>`;
+                htmlFinal += `</div>`;
+            }});
+
+            let totalSeconds = grandTotalMailles * secondsPerStitch;
+            let totalHours = Math.floor(totalSeconds / 3600);
+            let totalMinutes = Math.round((totalSeconds % 3600) / 60);
+            
+            let tempsTexte = totalHours > 0 ? `${{totalHours}}h ${{totalMinutes}}min` : `${{totalMinutes}} minutes`;
+            document.getElementById('timerBanner').innerHTML = `⏱️ Temps de crochet estimé (~${{grandTotalMailles}} mailles) : <b>${{tempsTexte}} de travail</b>`;
+
+            document.getElementById('contenu-patron').innerHTML = htmlFinal;
+        }}
+
+        function init3DViewer() {{
+            const container = document.getElementById('webgl-container');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+
+            const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, -150, 100);
+
+            const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(100, 200, 300);
+            scene.add(dirLight);
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            facesData.forEach(face => {{
+                face.forEach(vIdx => {{
+                    let v = verticesData[vIdx];
+                    positions.push(v[0], v[1], v[2]);
+                }});
+            }});
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({{ color: 0x3498db, roughness: 0.4, metalness: 0.2, side: THREE.DoubleSide }});
+            const mesh3D = new THREE.Mesh(geometry, material);
+            scene.add(mesh3D);
+
+            geometry.computeBoundingBox();
+            mesh3D.position.sub(geometry.boundingBox.getCenter(new THREE.Vector3()));
+
+            function animate() {{
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }}
+            animate();
+        }}
+
+        const encyclopedie = [
+            {{nom: "rouge", rgb: [255, 0, 0], hex: "#ff0000"}},
+            {{nom: "bleu", rgb: [30, 144, 255], hex: "#1e90ff"}},
+            {{nom: "vert", rgb: [0, 128, 0], hex: "#008000"}},
+            {{nom: "jaune", rgb: [255, 255, 0], hex: "#ffff00"}},
+            {{nom: "beige", rgb: [234, 172, 121], hex: "#eaac79"}},
+            {{nom: "rose", rgb: [255, 192, 203], hex: "#ffc0cb"}},
+            {{nom: "or", rgb: [255, 215, 0], hex: "#ffd700"}}
+        ];
+
+        function chercherCouleur() {{
+            let val = document.getElementById('colorInput').value.toLowerCase().trim();
+            let resDiv = document.getElementById('colorResult');
+            if(!val) {{ resDiv.innerHTML = "Entrez un nom ou des valeurs RGB."; return; }}
+            if(val.includes(',')) {{
+                let rgb = val.split(',').map(Number);
+                if(rgb.length === 3 && !rgb.some(isNaN)) {{
+                    let hex = `rgb(${{rgb[0]}},${{rgb[1]}},${{rgb[2]}})`;
+                    resDiv.innerHTML = `<span style="display:inline-block; width:20px; height:20px; background:${{hex}}; vertical-align:middle; border:1px solid #000; border-radius:3px; margin-right:8px;"></span> Nuance RGB(${{rgb.join(',')}})`;
+                    return;
+                }}
+            }}
+            let f = encyclopedie.find(c => c.nom.includes(val));
+            if(f) {{
+                resDiv.innerHTML = `<span style="display:inline-block; width:20px; height:20px; background:${{f.hex}}; vertical-align:middle; border:1px solid #000; border-radius:3px; margin-right:8px;"></span> ${{f.nom.toUpperCase()}} - RGB(${{f.rgb.join(',')}})`;
+            }} else {{
+                resDiv.innerHTML = "Couleur introuvable.";
+            }}
+        }}
+
+        window.onload = function() {{
+            init3DViewer();
+            mettreAJourPatron();
+        }};
+    </script>
+</body>
+</html>
+"""
     with open("patron_global_ultime.html", "w", encoding="utf-8") as f:
         f.write(html_content)
-        
-    print("[Succès] Export Multi-Formats généré : 'patron_global_ultime.md' et 'patron_global_ultime.html'")
+    print("[Succès] Export HTML corrigé et généré avec succès !")
 
 def extraire_tranches_mesh_avancees(sub_mesh):
     bounds = sub_mesh.bounds
     z_min, z_max = bounds[0][2], bounds[1][2]
-    hauteurs = np.arange(z_min + HAUTEUR_COUCHE_MM/2, z_max, HAUTEUR_COUCHE_MM)
+    hauteurs = np.arange(z_min + 1.0, z_max, 2.0)
     perimetres = []
-    
     for z in hauteurs:
         section = sub_mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
         if section is not None:
             path_2d, _ = section.to_2D()
-            perimetre_total = path_2d.length
-            if hasattr(path_2d, 'entities') and len(path_2d.entities) > 1:
-                try:
-                    perimetre_total = sum(e.length(path_2d.vertices) for e in path_2d.entities)
-                except:
-                    pass
-            perimetres.append(perimetre_total)
+            perimetres.append(path_2d.length)
         else:
             perimetres.append(0.0)
     return perimetres, hauteurs
 
 def scanner_details_et_zones(mesh):
-    print(f"\n--- Scanner intelligent & Export Master Multi-Formats ---")
+    print(f"\n--- Scanner intelligent & Chronoplanificateur ---")
     if not mesh.is_watertight:
         trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
-        
     mesh.apply_translation(-mesh.centroid)
     
     bounds = mesh.bounds
     z_min, z_max = bounds[0][2], bounds[1][2]
     hauteur_totale = z_max - z_min
-    
     if hauteur_totale < 5.0:
         mesh.apply_scale(100.0)
         bounds = mesh.bounds
         z_min, z_max = bounds[0][2], bounds[1][2]
         hauteur_totale = z_max - z_min
 
-    print(f"Hauteur globale de l'objet : {hauteur_totale:.1f} mm")
     face_centers = mesh.triangles_center
+    z_jambes = z_min + (hauteur_totale * 0.3)
+    z_corps = z_min + (hauteur_totale * 0.65)
+    z_tete = z_corps + ((z_max - z_corps) * 0.5)
 
-    z_jambes_limite = z_min + (hauteur_totale * 0.3)
-    z_corps_limite = z_min + (hauteur_totale * 0.65)
-    z_tete_limite = z_min + (hauteur_totale * 0.85)
-
-    zones_corps = {
-        "jambes": (z_min, z_jambes_limite),
-        "corps": (z_jambes_limite, z_corps_limite),
-        "tete": (z_corps_limite, z_tete_limite)
+    zones = {
+        "jambes": (z_min, z_jambes),
+        "corps": (z_jambes, z_corps),
+        "tete": (z_corps, z_max)
     }
 
-    toutes_les_parties = []
-
-    for nom, (z_s, z_e) in zones_corps.items():
-        mask = (face_centers[:, 2] >= z_s) & (face_centers[:, 2] < z_e)
+    parties_donnees = []
+    for nom, (zs, ze) in zones.items():
+        mask = (face_centers[:, 2] >= zs) & (face_centers[:, 2] < ze)
         if np.any(mask):
             sub = mesh.submesh([mask], append=True)
             if not sub.is_empty:
-                perims, h_z = extraire_tranches_mesh_avancees(sub)
-                texte_partie = generer_patron_partie(nom, perims, h_z, sub)
-                if texte_partie:
-                    toutes_les_parties.append(texte_partie)
+                pdata = generer_donnees_partie(nom, sub)
+                if pdata: parties_donnees.append(pdata)
 
     details_trouves = []
-    mask_chapeau = face_centers[:, 2] >= z_tete_limite
+    mask_chapeau = face_centers[:, 2] >= z_tete
     if np.any(mask_chapeau):
-        sub_chapeau = mesh.submesh([mask_chapeau], append=True)
-        if not sub_chapeau.is_empty and len(sub_chapeau.faces) > 5:
-            perims, h_z = extraire_tranches_mesh_avancees(sub_chapeau)
-            texte_partie = generer_patron_partie("detail_chapeau_casquette", perims, h_z, sub_chapeau)
-            if texte_partie: toutes_les_parties.append(texte_partie)
+        sub_c = mesh.submesh([mask_chapeau], append=True)
+        if not sub_c.is_empty and len(sub_c.faces) > 5:
+            pdata = generer_donnees_partie("detail_chapeau_casquette", sub_c)
+            if pdata: parties_donnees.append(pdata)
             details_trouves.append("detail_chapeau_casquette")
 
-    mask_moustache = (face_centers[:, 1] > (mesh.bounds[1][1] * 0.4)) & (face_centers[:, 2] > z_jambes_limite) & (face_centers[:, 2] < z_tete_limite)
-    if np.any(mask_moustache):
-        sub_mous = mesh.submesh([mask_moustache], append=True)
-        if not sub_mous.is_empty and len(sub_mous.faces) > 5:
-            perims, h_z = extraire_tranches_mesh_avancees(sub_mous)
-            texte_partie = generer_patron_partie("detail_moustache_nez", perims, h_z, sub_mous)
-            if texte_partie: toutes_les_parties.append(texte_partie)
-            details_trouves.append("detail_moustache_nez")
+    guide_texte = "<ul>"
+    if "detail_chapeau_casquette" in details_trouves: guide_texte += "<li><b>Chapeau / Casquette</b> : À positionner au sommet de la tête.</li>"
+    guide_texte += "<li><b>Membres / Corps</b> : À assembler selon la morphologie globale.</li></ul><blockquote>💡 <b>Astuce</b> : Épingle toutes les pièces avant la couture définitive.</blockquote>"
 
-    x_seuil = (mesh.bounds[1][0] - mesh.bounds[0][0]) * 0.25
-    mask_lateral = (np.abs(face_centers[:, 0]) > x_seuil) & (face_centers[:, 2] >= z_jambes_limite) & (face_centers[:, 2] < z_tete_limite)
-    if np.any(mask_lateral):
-        sub_lat = mesh.submesh([mask_lateral], append=True)
-        if not sub_lat.is_empty and len(sub_lat.faces) > 5:
-            perims, h_z = extraire_tranches_mesh_avancees(sub_lat)
-            texte_partie = generer_patron_partie("detail_oreilles_cornes_bras", perims, h_z, sub_lat)
-            if texte_partie: toutes_les_parties.append(texte_partie)
-            details_trouves.append("detail_oreilles_cornes_bras")
-
-    # Texte du guide d'assemblage
-    guide_texte = "## 🗺️ Guide d'assemblage et de cartographie spatiale\n\n"
-    if "detail_chapeau_casquette" in details_trouves: guide_texte += "- **Chapeau / Casquette** : À positionner au sommet de la tête.\n"
-    if "detail_moustache_nez" in details_trouves: guide_texte += "- **Moustache / Nez** : À coudre sur la face avant de la tête.\n"
-    if "detail_oreilles_cornes_bras" in details_trouves: guide_texte += "- **Membres / Accessoires latéraux** : À répartir symétriquement.\n"
-    guide_texte += "\n> 💡 **Astuce** : Épingle toutes les pièces avant la couture définitive."
-
-    # Compilation globale Master
-    compiler_master_document(toutes_les_parties, guide_texte)
+    compiler_master_document(parties_donnees, guide_texte, mesh)
 
 def main():
     nom_fichier = "mario_ia_genere.obj" if os.path.exists("mario_ia_genere.obj") else "mario.stl"
     if os.path.exists(nom_fichier):
-        print(f"Chargement du modèle 3D : {nom_fichier} ...")
         mesh = trimesh.load(nom_fichier)
     else:
-        print("Aucun fichier trouvé. Sphère de test...")
         mesh = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
-        
     scanner_details_et_zones(mesh)
 
 if __name__ == "__main__":
