@@ -1,5 +1,6 @@
 import numpy as np
 import trimesh
+import os
 
 def analyser_modele_3d(mesh):
     print(f"--- Analyse du modèle 3D ---")
@@ -7,7 +8,7 @@ def analyser_modele_3d(mesh):
     print(f"Nombre de faces : {len(mesh.faces)}")
     print(f"Volume : {mesh.volume:.2f} mm³")
     
-    # 0. Étape de nettoyage géométrique (Nouveau !)
+    # 0. Étape de nettoyage géométrique
     mesh_propre = nettoyer_modele_3d(mesh)
     
     # 1. Découpage en tranches sur le modèle nettoyé
@@ -20,17 +21,13 @@ def analyser_modele_3d(mesh):
 def nettoyer_modele_3d(mesh):
     print(f"\n--- Vérification et nettoyage du maillage 3D ---")
     
-    # Vérification si le maillage est étanche (fermé)
     if not mesh.is_watertight:
         print("-> Le modèle n'est pas étanche. Tentative de réparation...")
-        # Remplissage des petits trous
         mesh.fill_holes()
     else:
         print("-> Le modèle est parfaitement étanche (watertight).")
         
-    # Correction de l'orientation des faces (normales)
     mesh.fix_normals()
-    
     print(f"-> Nettoyage terminé.")
     return mesh
 
@@ -84,9 +81,19 @@ def traduire_en_crochet(perimetres, largeur_maille=8.0):
         dernier_nb_mailles = nb_mailles
 
 def main():
-    print("Génération d'une sphère 3D virtuelle pour le test...")
-    mesh_sphere = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
-    analyser_modele_3d(mesh_sphere)
+    # Nom du fichier 3D que l'on souhaite charger
+    nom_fichier = "modele.stl" # Tu pourras aussi mettre un fichier .obj
+    
+    # Vérification si le fichier existe dans le dossier du projet
+    if os.path.exists(nom_fichier):
+        print(f"Chargement du fichier 3D externe : {nom_fichier} ...")
+        mesh = trimesh.load(nom_fichier)
+    else:
+        print(f"Fichier '{nom_fichier}' non trouvé dans le dossier.")
+        print("Basculement automatique : génération d'une sphère 3D virtuelle de test...")
+        mesh = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
+        
+    analyser_modele_3d(mesh)
 
 if __name__ == "__main__":
     main()
