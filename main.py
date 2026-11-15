@@ -2,7 +2,10 @@ import os
 import trimesh
 import numpy as np
 
-def generer_patron_partie(nom_partie, perimetres_tranches, hauteur_couche=3.0, largeur_maille=8.0):
+def generer_patron_partie(nom_partie, perimetres_tranches, hauteur_couche=2.0, largeur_maille=8.0):
+    if len(perimetres_tranches) == 0 or max(perimetres_tranches) == 0:
+        return
+        
     lignes_patron = []
     lignes_patron.append(f"--- Patron de crochet : {nom_partie.upper()} ---")
     lignes_patron.append(f"Hauteur d'un rang : {hauteur_couche:.1f} mm | Taille maille : {largeur_maille} mm\n")
@@ -11,7 +14,7 @@ def generer_patron_partie(nom_partie, perimetres_tranches, hauteur_couche=3.0, l
     
     for i, perimetre in enumerate(perimetres_tranches):
         nb_mailles = int(round(perimetre / largeur_maille))
-        nb_mailles = max(nb_mailles, 4)
+        nb_mailles = max(nb_mailles, 4) # Cercle magique minimum
         
         if i == 0:
             action = "Base / Cercle magique"
@@ -28,35 +31,39 @@ def generer_patron_partie(nom_partie, perimetres_tranches, hauteur_couche=3.0, l
         lignes_patron.append(ligne)
         dernier_nb_mailles = nb_mailles
         
-    # Sauvegarde dans un fichier dédié à la partie
     nom_fichier_sortie = f"patron_{nom_partie}.md"
     with open(nom_fichier_sortie, "w", encoding="utf-8") as f:
         f.write("\n".join(lignes_patron))
-    print(f"[Succès] Fichier généré : {nom_fichier_sortie}")
+    print(f"[Succès] Mini-patron généré : {nom_fichier_sortie}")
 
-def extraire_tranches_zone(mesh, z_start, z_end):
-    # Découpe une portion spécifique de l'objet entre z_start et z_end
-    hauteur_couche = 3.0
-    hauteurs = np.arange(z_start + hauteur_couche/2, z_end, hauteur_couche)
+def extraire_tranches_mesh(sub_mesh, hauteur_couche=2.0):
+    bounds = sub_mesh.bounds
+    z_min, z_max = bounds[0][2], bounds[1][2]
+    hauteurs = np.arange(z_min + hauteur_couche/2, z_max, hauteur_couche)
     perimetres = []
     
     for z in hauteurs:
-        section = mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+        section = sub_mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
         if section is not None:
             path_2d, _ = section.to_2D()
-            perimetre_cumule = path_2d.length
-            perimetres.append(perimetre_cumule)
+            perimetre_total = path_2d.length
+            if hasattr(path_2d, 'entities') and len(path_2d.entities) > 1:
+                try:
+                    perimetre_total = sum(e.length(path_2d.vertices) for e in path_2d.entities)
+                except:
+                    pass
+            perimetres.append(perimetre_total)
         else:
             perimetres.append(0.0)
     return perimetres
 
-def analyser_modele_par_zones(mesh):
-    print("\n--- Analyse anatomique et découpage par zones ---")
+def scanner_details_et_zones(mesh):
+    print("\n--- Scanner intelligent de détails et d'accessoires ---")
     if not mesh.is_watertight:
         trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
         
-    # Centrage et normalisation
+    # Centrage de la figurine
     mesh.apply_translation(-mesh.centroid)
     
     bounds = mesh.bounds
@@ -69,31 +76,51 @@ def analyser_modele_par_zones(mesh):
         z_min, z_max = bounds[0][2], bounds[1][2]
         hauteur_totale = z_max - z_min
 
-    print(f"Hauteur totale de la figurine : {hauteur_totale:.1f} mm")
+    print(f"Hauteur de l'objet analysée : {hauteur_totale:.1f} mm")
 
-    # Définition des frontières des zones (en pourcentages de la hauteur)
-    # Zone 1 : Jambes (30% du bas)
-    # Zone 2 : Corps et Torse (40% du milieu)
-    # Zone 3 : Tête et Casquette (30% du haut)
-    z_limite_1 = z_min + (hauteur_totale * 0.3)
-    z_limite_2 = z_min + (hauteur_totale * 0.7)
+    face_centers = mesh.triangles_center
 
-    print("Génération des patrons par parties...")
-    
-    # 1. Les Jambes
-    perim_jambes = extraire_tranches_zone(mesh, z_min, z_limite_1)
-    if len(perim_jambes) > 0:
-        generer_patron_partie("jambes", perim_jambes)
+    # 1. SCANNER DU CORPS PRINCIPAL (Jambes, Torse, Tête)
+    z_jambes_limite = z_min + (hauteur_totale * 0.3)
+    z_corps_limite = z_min + (hauteur_totale * 0.65)
+    z_tete_limite = z_min + (hauteur_totale * 0.85)
 
-    # 2. Le Corps
-    perim_corps = extraire_tranches_zone(mesh, z_limite_1, z_limite_2)
-    if len(perim_corps) > 0:
-        generer_patron_partie("corps", perim_corps)
+    zones_corps = {
+        "jambes": (z_min, z_jambes_limite),
+        "corps": (z_jambes_limite, z_corps_limite),
+        "tete": (z_corps_limite, z_tete_limite)
+    }
 
-    # 3. La Tête
-    perim_tete = extraire_tranches_zone(mesh, z_limite_2, z_max)
-    if len(perim_tete) > 0:
-        generer_patron_partie("tete", perim_tete)
+    for nom, (z_s, z_e) in zones_corps.items():
+        mask = (face_centers[:, 2] >= z_s) & (face_centers[:, 2] < z_e)
+        if np.any(mask):
+            sub = mesh.submesh([mask], append=True)
+            if not sub.is_empty:
+                perims = extraire_tranches_mesh(sub)
+                generer_patron_partie(nom, perims)
+
+    # 2. SCANNER DES DÉTAILS ET ACCESSOIRES (Chapeau, Moustaches, Oreilles)
+    mask_chapeau = face_centers[:, 2] >= z_tete_limite
+    if np.any(mask_chapeau):
+        sub_chapeau = mesh.submesh([mask_chapeau], append=True)
+        if not sub_chapeau.is_empty and len(sub_chapeau.faces) > 5:
+            perims = extraire_tranches_mesh(sub_chapeau)
+            generer_patron_partie("detail_chapeau_casquette", perims)
+
+    mask_moustache = (face_centers[:, 1] > (mesh.bounds[1][1] * 0.4)) & (face_centers[:, 2] > z_jambes_limite) & (face_centers[:, 2] < z_tete_limite)
+    if np.any(mask_moustache):
+        sub_mous = mesh.submesh([mask_moustache], append=True)
+        if not sub_mous.is_empty and len(sub_mous.faces) > 5:
+            perims = extraire_tranches_mesh(sub_mous)
+            generer_patron_partie("detail_moustache_nez", perims)
+
+    x_seuil = (mesh.bounds[1][0] - mesh.bounds[0][0]) * 0.25
+    mask_lateral = (np.abs(face_centers[:, 0]) > x_seuil) & (face_centers[:, 2] >= z_jambes_limite) & (face_centers[:, 2] < z_tete_limite)
+    if np.any(mask_lateral):
+        sub_lat = mesh.submesh([mask_lateral], append=True)
+        if not sub_lat.is_empty and len(sub_lat.faces) > 5:
+            perims = extraire_tranches_mesh(sub_lat)
+            generer_patron_partie("detail_oreilles_cornes_bras", perims)
 
 def main():
     fichiers_stl = [f for f in os.listdir('.') if f.lower().endswith('.stl')]
@@ -109,7 +136,7 @@ def main():
         print("Aucun fichier .stl trouvé. Sphère de test par défaut...")
         mesh = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
         
-    analyser_modele_par_zones(mesh)
+    scanner_details_et_zones(mesh)
 
 if __name__ == "__main__":
     main()
