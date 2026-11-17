@@ -14,6 +14,51 @@ st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
 if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
 
+def generer_via_cloud(chemin_image):
+    # 1. Essai avec TencentARC/InstantMesh (rapide et gratuit)
+    try:
+        client = Client("TencentARC/InstantMesh")
+        img_nettoyee = client.predict(
+            input_image=handle_file(chemin_image),
+            do_remove_background=True,
+            api_name="/preprocess"
+        )
+        mv_images = client.predict(
+            input_image=handle_file(img_nettoyee),
+            sample_steps=30,
+            sample_seed=42,
+            api_name="/generate_mvs"
+        )
+        res_3d = client.predict(api_name="/make3d")
+        return res_3d[0] if isinstance(res_3d, (list, tuple)) else res_3d
+    except Exception:
+        pass
+
+    # 2. Bascule automatique vers JeffreyXiang/TRELLIS
+    client = Client("JeffreyXiang/TRELLIS")
+    client.predict(api_name="/start_session")
+    img_prete = client.predict(
+        image=handle_file(chemin_image),
+        api_name="/preprocess_image"
+    )
+    client.predict(
+        image=handle_file(img_prete),
+        multiimages=[],
+        seed=42,
+        ss_guidance_strength=7.5,
+        ss_sampling_steps=12,
+        slat_guidance_strength=3.0,
+        slat_sampling_steps=12,
+        multiimage_algo="stochastic",
+        api_name="/image_to_3d"
+    )
+    glb_path = client.predict(
+        mesh_simplify=0.95,
+        texture_size=512,
+        api_name="/extract_glb"
+    )
+    return glb_path[0] if isinstance(glb_path, (list, tuple)) else glb_path
+
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -21,23 +66,15 @@ with col1:
     taille_mm = st.slider("📏 Hauteur finale (mm)", 50, 300, 150, 10)
 
     if fichier_image is not None and st.button("✨ 1. Générer le modèle 3D", type="primary", use_container_width=True):
-        with st.spinner("🧠 Détourage et sculpture 3D via le cloud gratuit en cours (20-40s)..."):
+        with st.spinner("🧠 Détourage et sculpture 3D en cours (30 à 60 secondes)..."):
             temp_img = "input_temp.png"
             with open(temp_img, "wb") as f_img:
                 f_img.write(fichier_image.getbuffer())
 
             try:
-                client = Client("stabilityai/TripoSR")
-                img_sans_fond = client.predict(handle_file(temp_img), api_name="/preprocess")
-                resultat_3d = client.predict(
-                    handle_file(img_sans_fond),
-                    0.85,
-                    192,
-                    api_name="/generate"
-                )
-                chemin_mesh = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
-
+                chemin_mesh = generer_via_cloud(temp_img)
                 mesh_3d = trimesh.load(chemin_mesh, force="mesh")
+
                 morceaux = mesh_3d.split(only_watertight=False)
                 if len(morceaux) > 1:
                     mesh_3d = max(morceaux, key=lambda m: len(m.faces))
@@ -61,7 +98,7 @@ with col1:
                 mesh_3d.export("mario_ia_genere.obj")
                 st.session_state.mesh_valide = True
             except Exception as e:
-                st.error(f"Le serveur 3D public est temporairement occupé : {e}")
+                st.error(f"Les serveurs 3D publics sont saturés pour le moment : {e}")
 
 with col2:
     if st.session_state.mesh_valide and os.path.exists("mario_ia_genere.obj"):
