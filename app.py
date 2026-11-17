@@ -14,41 +14,25 @@ st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
 if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
 
-def generer_via_cloud(chemins_images):
-    image_principale = chemins_images[0]
-
-    # 1. Tentative avec stabilityai/TripoSR
-    try:
-        client = Client("stabilityai/TripoSR")
-        img_sans_fond = client.predict(handle_file(image_principale), api_name="/preprocess")
-        resultat_3d = client.predict(
-            handle_file(img_sans_fond),
-            0.85,
-            192,
-            api_name="/generate"
-        )
-        chemin_glb = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
-        if chemin_glb and os.path.exists(chemin_glb):
-            return chemin_glb
-    except Exception:
-        pass
-
-    # 2. Tentative de secours avec camenduru/InstantMesh
-    try:
-        client = Client("camenduru/InstantMesh")
-        res = client.predict(
-            input_image=handle_file(image_principale),
-            api_name="/run"
-        )
-        return res[0] if isinstance(res, (list, tuple)) else res
-    except Exception as e:
-        raise Exception(f"Les serveurs 3D publics sont temporairement indisponibles ({e}). Réessaie dans une minute.")
+def generer_via_cloud(chemin_image):
+    client = Client("stabilityai/TripoSR")
+    img_sans_fond = client.predict(handle_file(chemin_image), api_name="/preprocess")
+    resultat_3d = client.predict(
+        handle_file(img_sans_fond),
+        0.85,
+        192,
+        api_name="/generate"
+    )
+    chemin_glb = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
+    if chemin_glb and os.path.exists(chemin_glb):
+        return chemin_glb
+    raise Exception("Le modèle 3D n'a pas pu être généré par le serveur.")
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
     fichiers_images = st.file_uploader(
-        "📸 1. Importe ta photo (ou tes vues)",
+        "📸 1. Importe ta photo 2D (PNG, JPG)",
         type=["png", "jpg", "jpeg"],
         accept_multiple_files=True
     )
@@ -63,15 +47,12 @@ with col1:
 
     if fichiers_images and st.button("✨ 1. Générer le modèle 3D", type="primary", use_container_width=True):
         with st.spinner("🧠 Sculpture 3D en cours (20 à 40 secondes)..."):
-            chemins_temp = []
-            for idx, f_img in enumerate(fichiers_images[:4]):
-                chemin_tmp = f"input_temp_{idx}.png"
-                with open(chemin_tmp, "wb") as out_f:
-                    out_f.write(f_img.getbuffer())
-                chemins_temp.append(chemin_tmp)
+            chemin_tmp = "input_temp.png"
+            with open(chemin_tmp, "wb") as out_f:
+                out_f.write(fichiers_images[0].getbuffer())
 
             try:
-                chemin_mesh = generer_via_cloud(chemins_temp)
+                chemin_mesh = generer_via_cloud(chemin_tmp)
                 mesh_3d = trimesh.load(chemin_mesh, force="mesh")
 
                 morceaux = mesh_3d.split(only_watertight=False)
@@ -97,7 +78,7 @@ with col1:
                 mesh_3d.export("mario_ia_genere.obj")
                 st.session_state.mesh_valide = True
             except Exception as e:
-                st.error(f"{e}")
+                st.error(f"Erreur lors de la génération 3D : {e}")
 
 with col2:
     if st.session_state.mesh_valide and os.path.exists("mario_ia_genere.obj"):
