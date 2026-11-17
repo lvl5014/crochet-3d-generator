@@ -16,96 +16,45 @@ if "mesh_valide" not in st.session_state:
 
 def generer_via_cloud(chemins_images):
     image_principale = chemins_images[0]
-    images_supplementaires = chemins_images[1:]
 
-    # 1. Si plusieurs images sont fournies, on utilise directement TRELLIS en mode multi-vues
-    if len(images_supplementaires) > 0:
-        client = Client("JeffreyXiang/TRELLIS")
-        client.predict(api_name="/start_session")
-        
-        img_principale_prete = client.predict(
-            image=handle_file(image_principale),
-            api_name="/preprocess_image"
-        )
-        
-        liste_multi = []
-        for chemin in images_supplementaires:
-            img_sup_prete = client.predict(
-                image=handle_file(chemin),
-                api_name="/preprocess_image"
-            )
-            liste_multi.append({"image": handle_file(img_sup_prete), "caption": ""})
-
-        client.predict(
-            image=handle_file(img_principale_prete),
-            multiimages=liste_multi,
-            seed=42,
-            ss_guidance_strength=7.5,
-            ss_sampling_steps=12,
-            slat_guidance_strength=3.0,
-            slat_sampling_steps=12,
-            multiimage_algo="stochastic",
-            api_name="/image_to_3d"
-        )
-        glb_path = client.predict(
-            mesh_simplify=0.95,
-            texture_size=512,
-            api_name="/extract_glb"
-        )
-        return glb_path[0] if isinstance(glb_path, (list, tuple)) else glb_path
-
-    # 2. Si une seule image est fournie : essai avec InstantMesh puis bascule vers TRELLIS
+    # 1. Tentative avec stabilityai/TripoSR (le plus stable et rapide)
     try:
-        client = Client("TencentARC/InstantMesh")
-        img_nettoyee = client.predict(
-            input_image=handle_file(image_principale),
-            do_remove_background=True,
-            api_name="/preprocess"
+        client = Client("stabilityai/TripoSR")
+        img_sans_fond = client.predict(handle_file(image_principale), api_name="/preprocess")
+        resultat_3d = client.predict(
+            handle_file(img_sans_fond),
+            0.85,
+            192,
+            api_name="/generate"
         )
-        client.predict(
-            input_image=handle_file(img_nettoyee),
-            sample_steps=30,
-            sample_seed=42,
-            api_name="/generate_mvs"
-        )
-        res_3d = client.predict(api_name="/make3d")
-        return res_3d[0] if isinstance(res_3d, (list, tuple)) else res_3d
+        chemin_glb = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
+        if chemin_glb and os.path.exists(chemin_glb):
+            return chemin_glb
     except Exception:
-        client = Client("JeffreyXiang/TRELLIS")
-        client.predict(api_name="/start_session")
-        img_prete = client.predict(
-            image=handle_file(image_principale),
-            api_name="/preprocess_image"
+        pass
+
+    # 2. Tentative de secours avec camenduru/InstantMesh
+    try:
+        client = Client("camenduru/InstantMesh")
+        res = client.predict(
+            input_image=handle_file(image_principale),
+            api_name="/run"
         )
-        client.predict(
-            image=handle_file(img_prete),
-            multiimages=[],
-            seed=42,
-            ss_guidance_strength=7.5,
-            ss_sampling_steps=12,
-            slat_guidance_strength=3.0,
-            slat_sampling_steps=12,
-            multiimage_algo="stochastic",
-            api_name="/image_to_3d"
-        )
-        glb_path = client.predict(
-            mesh_simplify=0.95,
-            texture_size=512,
-            api_name="/extract_glb"
-        )
-        return glb_path[0] if isinstance(glb_path, (list, tuple)) else glb_path
+        return res[0] if isinstance(res, (list, tuple)) else res
+    except Exception as e:
+        raise Exception(Tous les serveurs 3D publics sont temporairement indisponibles ({e}). Réessaie dans une minute.)
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
     fichiers_images = st.file_uploader(
-        "📸 1. Importe 1 à 4 photos sous différents angles (Face, Profil, Dos...)",
+        "📸 1. Importe ta photo (ou tes vues)",
         type=["png", "jpg", "jpeg"],
         accept_multiple_files=True
     )
     
     if fichiers_images:
-        st.caption(f"✅ {len(fichiers_images)} vue(s) sélectionnée(s) (la 1ʳᵉ image sert de vue principale de face).")
+        st.caption(f"✅ {len(fichiers_images)} vue(s) sélectionnée(s).")
         cols_apercu = st.columns(min(len(fichiers_images), 4))
         for idx, f_img in enumerate(fichiers_images[:4]):
             cols_apercu[idx].image(f_img, caption=f"Vue {idx+1}", use_container_width=True)
@@ -113,7 +62,7 @@ with col1:
     taille_mm = st.slider("📏 Hauteur finale (mm)", 50, 300, 150, 10)
 
     if fichiers_images and st.button("✨ 1. Générer le modèle 3D", type="primary", use_container_width=True):
-        with st.spinner("🧠 Détourage des vues et sculpture 3D multi-angles en cours (30 à 60s)..."):
+        with st.spinner("🧠 Sculpture 3D en cours (20 à 40 secondes)..."):
             chemins_temp = []
             for idx, f_img in enumerate(fichiers_images[:4]):
                 chemin_tmp = f"input_temp_{idx}.png"
@@ -148,7 +97,7 @@ with col1:
                 mesh_3d.export("mario_ia_genere.obj")
                 st.session_state.mesh_valide = True
             except Exception as e:
-                st.error(f"Les serveurs 3D publics sont saturés pour le moment : {e}")
+                st.error(f"{e}")
 
 with col2:
     if st.session_state.mesh_valide and os.path.exists("mario_ia_genere.obj"):
