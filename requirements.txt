@@ -1,14 +1,7 @@
 streamlit
-torch
-torchvision
-omegaconf
-einops
-huggingface-hub
-transformers
+gradio_client
 trimesh
-rembg
-onnxruntime
-scikit-image
+numpy
 plotly
 pillow
-imageio
+scipy
