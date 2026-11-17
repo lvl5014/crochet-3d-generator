@@ -1,0 +1,13 @@
+streamlit
+torch
+torchvision
+omegaconf
+einops
+huggingface-hub
+trimesh
+rembg
+onnxruntime
+scikit-image
+plotly
+pillow<12.0
+git+https://github.com/VAST-AI-Research/TripoSR.git
