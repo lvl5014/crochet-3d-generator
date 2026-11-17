@@ -17,7 +17,7 @@ if "mesh_valide" not in st.session_state:
 def generer_via_cloud(chemins_images):
     image_principale = chemins_images[0]
 
-    # 1. Tentative avec stabilityai/TripoSR (le plus stable et rapide)
+    # 1. Tentative avec stabilityai/TripoSR
     try:
         client = Client("stabilityai/TripoSR")
         img_sans_fond = client.predict(handle_file(image_principale), api_name="/preprocess")
@@ -42,7 +42,7 @@ def generer_via_cloud(chemins_images):
         )
         return res[0] if isinstance(res, (list, tuple)) else res
     except Exception as e:
-        raise Exception(Tous les serveurs 3D publics sont temporairement indisponibles ({e}). Réessaie dans une minute.)
+        raise Exception(f"Les serveurs 3D publics sont temporairement indisponibles ({e}). Réessaie dans une minute.")
 
 col1, col2 = st.columns([1, 1])
 
