@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import streamlit as st
 import streamlit.components.v1 as components
@@ -12,6 +13,15 @@ from huggingface_hub import hf_hub_download
 
 st.set_page_config(page_title="Patron Amigurumi Pro 3D", page_icon="🐉", layout="wide")
 st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
+
+# Téléchargement automatique du code source TripoSR s'il n'est pas encore présent
+if not os.path.exists("TripoSR"):
+    subprocess.run(["git", "clone", "https://github.com/VAST-AI-Research/TripoSR.git"], check=True)
+if os.path.abspath("TripoSR") not in sys.path:
+    sys.path.insert(0, os.path.abspath("TripoSR"))
+
+from tsr.system import TSR
+from tsr.utils import resize_foreground
 
 @st.cache_resource
 def charger_moteur_3d():
@@ -32,15 +42,12 @@ def charger_moteur_3d():
     _orig_torch_load = torch.load
     torch.load = lambda *args, **kwargs: clean_ckpt if str(args[0]).endswith("model.ckpt") else _orig_torch_load(*args, **kwargs)
 
-    from tsr.system import TSR
     model = TSR.from_pretrained("stabilityai/TripoSR", config_name="config.yaml", weight_name="model.ckpt")
     torch.load = _orig_torch_load
 
     model.renderer.set_chunk_size(4096)
     model.to("cpu")
     return model
-
-from tsr.utils import resize_foreground
 
 if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
@@ -86,7 +93,6 @@ with col1:
             trimesh.repair.fix_normals(mesh_3d)
             mesh_3d.vertices[:, 2] -= mesh_3d.bounds[0][2]
 
-            # Sauvegarde sous le nom attendu par main.py
             mesh_3d.export("mario_ia_genere.obj")
             st.session_state.mesh_valide = True
 
@@ -106,7 +112,7 @@ with col2:
 
         if st.button("🧶 2. Valider le 3D et Créer le Patron Complet", type="primary", use_container_width=True):
             with st.spinner("⚙️ Exécution de main.py et calcul des rangs de crochet..."):
-                subprocess.run(["python", "main.py"], check=False)
+                subprocess.run([sys.executable, "main.py"], check=False)
                 if os.path.exists("patron_global_ultime.html"):
                     with open("patron_global_ultime.html", "r", encoding="utf-8") as f_html:
                         html_contenu = f_html.read()
