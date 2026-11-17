@@ -1,65 +1,15 @@
 import os
 import sys
-import types
 import subprocess
 import streamlit as st
 import streamlit.components.v1 as components
-import torch
 import trimesh
 import numpy as np
 import plotly.graph_objects as go
-from PIL import Image
-from rembg import remove
-from huggingface_hub import hf_hub_download
-from skimage.measure import marching_cubes as skimage_marching_cubes
+from gradio_client import Client, handle_file
 
 st.set_page_config(page_title="Patron Amigurumi Pro 3D", page_icon="🐉", layout="wide")
 st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
-
-# Création du module relais torchmcubes sur CPU (évite la compilation C++/CUDA)
-if "torchmcubes" not in sys.modules:
-    fake_torchmcubes = types.ModuleType("torchmcubes")
-    def marching_cubes(vol, thresh):
-        vol_np = vol.detach().cpu().numpy() if torch.is_tensor(vol) else np.asarray(vol)
-        verts, faces, _, _ = skimage_marching_cubes(vol_np, level=float(thresh))
-        return torch.from_numpy(verts.copy()).float(), torch.from_numpy(faces.copy()).long()
-    fake_torchmcubes.marching_cubes = marching_cubes
-    sys.modules["torchmcubes"] = fake_torchmcubes
-
-# Téléchargement automatique du code source TripoSR
-if not os.path.exists("TripoSR"):
-    subprocess.run(["git", "clone", "https://github.com/VAST-AI-Research/TripoSR.git"], check=True)
-if os.path.abspath("TripoSR") not in sys.path:
-    sys.path.insert(0, os.path.abspath("TripoSR"))
-
-from tsr.system import TSR
-from tsr.utils import resize_foreground
-
-@st.cache_resource
-def charger_moteur_3d():
-    ckpt_path = hf_hub_download(repo_id="stabilityai/TripoSR", filename="model.ckpt")
-    raw_ckpt = torch.load(ckpt_path, map_location="cpu")
-
-    clean_ckpt = {}
-    for k, v in raw_ckpt.items():
-        nk = k.replace("encoder.layer.", "layers.")
-        nk = nk.replace("attention.attention.query.", "attention.q_proj.")
-        nk = nk.replace("attention.attention.key.", "attention.k_proj.")
-        nk = nk.replace("attention.attention.value.", "attention.v_proj.")
-        nk = nk.replace("attention.output.dense.", "attention.o_proj.")
-        nk = nk.replace("intermediate.dense.", "mlp.fc1.")
-        nk = nk.replace("output.dense.", "mlp.fc2.")
-        clean_ckpt[nk] = v
-
-    _orig_torch_load = torch.load
-    torch.load = lambda *args, **kwargs: clean_ckpt if str(args[0]).endswith("model.ckpt") else _orig_torch_load(*args, **kwargs)
-
-    model = TSR.from_pretrained("stabilityai/TripoSR", config_name="config.yaml", weight_name="model.ckpt")
-    torch.load = _orig_torch_load
-
-    model.renderer.set_chunk_size(4096)
-    model.to("cpu")
-    return model
 
 if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
@@ -69,56 +19,69 @@ col1, col2 = st.columns([1, 1])
 with col1:
     fichier_image = st.file_uploader("📸 1. Importe ta photo 2D (PNG, JPG)", type=["png", "jpg", "jpeg"])
     taille_mm = st.slider("📏 Hauteur finale (mm)", 50, 300, 150, 10)
-    
+
     if fichier_image is not None and st.button("✨ 1. Générer le modèle 3D", type="primary", use_container_width=True):
-        with st.spinner("🧠 Détourage et sculpture 3D en cours..."):
-            model = charger_moteur_3d()
-            image_brute = Image.open(fichier_image).convert("RGBA")
-            image_sans_fond = remove(image_brute)
-            image_prete = resize_foreground(image_sans_fond, 0.85)
-            fond_gris = Image.new("RGBA", image_prete.size, (127, 127, 127, 255))
-            image_finale = Image.alpha_composite(fond_gris, image_prete).convert("RGB")
+        with st.spinner("🧠 Détourage et sculpture 3D via le cloud gratuit en cours (20-40s)..."):
+            temp_img = "input_temp.png"
+            with open(temp_img, "wb") as f_img:
+                f_img.write(fichier_image.getbuffer())
 
-            with torch.no_grad():
-                scene_codes = model([image_finale], device="cpu")
+            try:
+                client = Client("stabilityai/TripoSR")
+                img_sans_fond = client.predict(handle_file(temp_img), api_name="/preprocess")
+                resultat_3d = client.predict(
+                    handle_file(img_sans_fond),
+                    0.85,
+                    192,
+                    api_name="/generate"
+                )
+                chemin_mesh = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
 
-            meshes = model.extract_mesh(scene_codes, has_vertex_color=True, resolution=192)
-            mesh_3d = meshes[0]
+                mesh_3d = trimesh.load(chemin_mesh, force="mesh")
+                morceaux = mesh_3d.split(only_watertight=False)
+                if len(morceaux) > 1:
+                    mesh_3d = max(morceaux, key=lambda m: len(m.faces))
 
-            morceaux = mesh_3d.split(only_watertight=False)
-            if len(morceaux) > 1:
-                mesh_3d = max(morceaux, key=lambda m: len(m.faces))
+                rot_x = trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0])
+                rot_z = trimesh.transformations.rotation_matrix(np.radians(90), [0, 0, 1])
+                mesh_3d.apply_transform(rot_x)
+                mesh_3d.apply_transform(rot_z)
 
-            rot_x = trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0])
-            rot_z = trimesh.transformations.rotation_matrix(np.radians(90), [0, 0, 1])
-            mesh_3d.apply_transform(rot_x)
-            mesh_3d.apply_transform(rot_z)
+                hauteur = mesh_3d.bounds[1][2] - mesh_3d.bounds[0][2]
+                mesh_3d.apply_scale(float(taille_mm) / hauteur)
+                mesh_3d.vertices[:, 0] -= (mesh_3d.bounds[0][0] + mesh_3d.bounds[1][0]) / 2.0
+                mesh_3d.vertices[:, 1] -= (mesh_3d.bounds[0][1] + mesh_3d.bounds[1][1]) / 2.0
+                mesh_3d.vertices[:, 2] -= mesh_3d.bounds[0][2]
 
-            hauteur = mesh_3d.bounds[1][2] - mesh_3d.bounds[0][2]
-            mesh_3d.apply_scale(float(taille_mm) / hauteur)
-            mesh_3d.vertices[:, 0] -= (mesh_3d.bounds[0][0] + mesh_3d.bounds[1][0]) / 2.0
-            mesh_3d.vertices[:, 1] -= (mesh_3d.bounds[0][1] + mesh_3d.bounds[1][1]) / 2.0
-            mesh_3d.vertices[:, 2] -= mesh_3d.bounds[0][2]
+                trimesh.smoothing.filter_laplacian(mesh_3d, iterations=2)
+                trimesh.repair.fill_holes(mesh_3d)
+                trimesh.repair.fix_normals(mesh_3d)
+                mesh_3d.vertices[:, 2] -= mesh_3d.bounds[0][2]
 
-            trimesh.smoothing.filter_laplacian(mesh_3d, iterations=2)
-            trimesh.repair.fill_holes(mesh_3d)
-            trimesh.repair.fix_normals(mesh_3d)
-            mesh_3d.vertices[:, 2] -= mesh_3d.bounds[0][2]
-
-            mesh_3d.export("mario_ia_genere.obj")
-            st.session_state.mesh_valide = True
+                mesh_3d.export("mario_ia_genere.obj")
+                st.session_state.mesh_valide = True
+            except Exception as e:
+                st.error(f"Le serveur 3D public est temporairement occupé : {e}")
 
 with col2:
     if st.session_state.mesh_valide and os.path.exists("mario_ia_genere.obj"):
-        mesh_apercu = trimesh.load("mario_ia_genere.obj")
+        mesh_apercu = trimesh.load("mario_ia_genere.obj", force="mesh")
         v, f = mesh_apercu.vertices, mesh_apercu.faces
-        c = mesh_apercu.visual.vertex_colors[:, :3] if hasattr(mesh_apercu.visual, "vertex_colors") else np.full((len(v), 3), 180)
-        fig = go.Figure(data=[go.Mesh3d(
-            x=v[:, 0], y=v[:, 1], z=v[:, 2],
-            i=f[:, 0], j=f[:, 1], k=f[:, 2],
-            vertexcolor=[f"rgb({r},{g},{b})" for r, g, b in c],
-            flatshading=True
-        )])
+        if hasattr(mesh_apercu.visual, "vertex_colors") and mesh_apercu.visual.vertex_colors is not None and len(mesh_apercu.visual.vertex_colors) == len(v):
+            c = mesh_apercu.visual.vertex_colors[:, :3]
+            fig = go.Figure(data=[go.Mesh3d(
+                x=v[:, 0], y=v[:, 1], z=v[:, 2],
+                i=f[:, 0], j=f[:, 1], k=f[:, 2],
+                vertexcolor=[f"rgb({r},{g},{b})" for r, g, b in c],
+                flatshading=True
+            )])
+        else:
+            fig = go.Figure(data=[go.Mesh3d(
+                x=v[:, 0], y=v[:, 1], z=v[:, 2],
+                i=f[:, 0], j=f[:, 1], k=f[:, 2],
+                color="#d97757",
+                flatshading=True
+            )])
         fig.update_layout(scene=dict(aspectmode="data"), height=380, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig, use_container_width=True)
 
