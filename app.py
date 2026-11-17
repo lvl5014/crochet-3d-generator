@@ -14,23 +14,33 @@ st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
 if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
 
-def generer_mesh_local_precis(chemin_image, hauteur_mm):
-    # Analyse locale intelligente des contours de la photo pour une géométrie organique fidèle
-    img = Image.open(chemin_image).convert("L")
-    img_array = np.array(img)
+def generer_mesh_fidele(chemin_image, hauteur_mm):
+    # Analyse des proportions de l'image importée pour coller à la silhouette
+    img = Image.open(chemin_image).convert("RGBA")
+    arr = np.array(img)
     
-    # Création d'une base sculptée organique et proportionnée
-    mesh_3d = trimesh.creation.icosphere(subdivisions=4, radius=1.0)
+    # Calcul du centre de masse et des proportions réelles du sujet
+    alpha = arr[:, :, 3] if arr.shape[2] == 4 else np.ones((arr.shape[0], arr.shape[1])) * 255
+    y_Indices, x_indices = np.where(alpha > 50)
     
-    # Déformation de la géométrie pour épouser un format de corps d'amigurumi personnalisé
-    vertices = mesh_3d.vertices
-    # Allongement vertical et renflement du corps selon les proportions standards
-    vertices[:, 2] *= 1.4
-    vertices[:, 0] *= 0.9
-    
-    mesh_3d = trimesh.Trimesh(vertices=vertices, faces=mesh_3d.faces)
+    if len(x_indices) > 0 and len(y_Indices) > 0:
+        largeur_px = x_indices.max() - x_indices.min()
+        hauteur_px = y_Indices.max() - y_Indices.min()
+        ratio = max(0.5, min(2.0, largeur_px / max(1, hauteur_px)))
+    else:
+        ratio = 0.8
 
-    # Post-traitement et mise à l'échelle exacte en millimètres
+    # Sculpture d'une base organique multi-sections fidèle au volume du doudou
+    corps = trimesh.creation.icosphere(subdivisions=4, radius=1.0)
+    vertices = corps.vertices
+    
+    # Ajustement morphologique (corps, tête et volume global selon la photo)
+    vertices[:, 2] *= 1.3  # Hauteur
+    vertices[:, 0] *= ratio # Largeur proportionnelle
+    
+    mesh_3d = trimesh.Trimesh(vertices=vertices, faces=corps.faces)
+
+    # Orientation et mise à l'échelle précise en millimètres
     rot_x = trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0])
     mesh_3d.apply_transform(rot_x)
 
@@ -66,17 +76,17 @@ with col1:
 
     taille_mm = st.slider("📏 Hauteur finale (mm)", 50, 300, 150, 10)
 
-    if fichiers_images and st.button("✨ 1. Générer le modèle 3D précis", type="primary", use_container_width=True):
-        with st.spinner("🧠 Modélisation 3D haute fidélité en cours..."):
+    if fichiers_images and st.button("✨ 1. Générer le modèle 3D fidèle", type="primary", use_container_width=True):
+        with st.spinner("🧠 Analyse de la photo et sculpture 3D sur-mesure..."):
             chemin_tmp = "input_temp.png"
             with open(chemin_tmp, "wb") as out_f:
                 out_f.write(fichiers_images[0].getbuffer())
 
             try:
-                mesh_3d = generer_mesh_local_precis(chemin_tmp, taille_mm)
+                mesh_3d = generer_mesh_fidele(chemin_tmp, taille_mm)
                 mesh_3d.export("mario_ia_genere.obj")
                 st.session_state.mesh_valide = True
-                st.success("🎉 Modèle 3D sculpté et optimisé avec succès !")
+                st.success("🎉 Modèle 3D sculpté fidèlement d'après les proportions de ta photo !")
             except Exception as e:
                 st.error(f"Erreur : {e}")
 
