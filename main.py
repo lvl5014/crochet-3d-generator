@@ -46,7 +46,7 @@ def extraire_couleurs_mailles_par_maille(sub_mesh, z_hauteur, nb_mailles):
         return [("#1e64c8", "Royal Blue")] * nb_mailles
 
     face_centers = sub_mesh.triangles_center
-    masque_tranche = np.abs(face_centers[:, 2] - z_hauteur) <= 1.0
+    masque_tranche = np.abs(face_centers[:, 2] - z_hauteur) <= 2.0
     
     if not np.any(masque_tranche):
         return [("#1e64c8", "Royal Blue")] * nb_mailles
@@ -109,7 +109,7 @@ def generer_donnees_partie(nom_partie, sub_mesh):
         nom_fil, _ = trouver_fil_reel_le_plus_proche(np.mean(colors[:, :3], axis=0))
         couleur_partie = nom_fil
 
-    hauteurs_tranches = np.arange(z_min + 1.0, z_max, 2.0)
+    hauteurs_tranches = np.arange(z_min + 1.0, z_max, max(2.0, hauteur_totale / 5.0))
     tranches_couleurs = []
     for z in hauteurs_tranches:
         c_mailles = extraire_couleurs_mailles_par_maille(sub_mesh, z, 12)
@@ -128,90 +128,127 @@ def generer_donnees_partie(nom_partie, sub_mesh):
     }
 
 def compiler_master_document(parties_donnees, mesh):
+    if not parties_donnees:
+        bounds = mesh.bounds
+        parties_donnees = [{
+            "nom": "corps_principal",
+            "z_min": float(bounds[0][2]),
+            "z_max": float(bounds[1][2]),
+            "hauteur_totale": float(bounds[1][2] - bounds[0][2]),
+            "vol_cm3": 15.0,
+            "poids_ouate": 5.0,
+            "armature": False,
+            "couleur_partie": "Royal Blue (Hobbii 88)",
+            "tranches_couleurs": [[("#1e64c8", "Royal Blue (Hobbii 88)")] * 12]
+        }]
+
     vertices_json = json.dumps(mesh.vertices.tolist())
     faces_json = json.dumps(mesh.faces.tolist())
     parties_json = json.dumps(parties_donnees)
     
+    manifest_content = {
+        "name": "Patron Amigurumi Pro",
+        "short_name": "AmigurumiPro",
+        "start_url": "patron_global_ultime.html",
+        "display": "standalone",
+        "background_color": "#fdfdfd",
+        "theme_color": "#3498db",
+        "icons": []
+    }
+    with open("manifest.json", "w", encoding="utf-8") as f:
+        json.dump(manifest_content, f, indent=2)
+
     html_content = f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Patron Amigurumi Pro - Épinglage 3D & Nomenclature</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Patron Amigurumi Pro - Mobile & Tablette</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#3498db">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
-        body {{ font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 20px; color: #333; line-height: 1.6; background-color: #fdfdfd; }}
-        h1 {{ color: #2c3e50; text-align: center; border-bottom: 3px solid #3498db; padding-bottom: 15px; }}
-        h2 {{ color: #e74c3c; border-bottom: 2px solid #bdc3c7; padding-top: 20px; }}
-        h3 {{ color: #2980b9; }}
-        blockquote {{ background: #f8f9fa; border-left: 5px solid #3498db; margin: 20px 0; padding: 15px; }}
+        body {{ font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 15px; color: #333; line-height: 1.6; background-color: #fdfdfd; -webkit-tap-highlight-color: transparent; }}
+        h1 {{ color: #2c3e50; text-align: center; border-bottom: 3px solid #3498db; padding-bottom: 15px; font-size: 22px; }}
+        h2 {{ color: #e74c3c; border-bottom: 2px solid #bdc3c7; padding-top: 20px; font-size: 18px; }}
+        h3 {{ color: #2980b9; font-size: 16px; }}
         ul {{ list-style-type: disc; padding-left: 20px; }}
-        li {{ margin-bottom: 6px; }}
+        li {{ margin-bottom: 6px; font-size: 14px; }}
         
-        .config-panel {{ background: #e8f4fc; border: 2px solid #3498db; padding: 20px; border-radius: 8px; margin: 20px 0; display: flex; justify-content: space-around; flex-wrap: wrap; gap: 15px; text-align: center; font-weight: bold; }}
-        .config-group select {{ padding: 8px 12px; font-size: 15px; border-radius: 5px; border: 1px solid #3498db; background: white; cursor: pointer; margin-top: 5px; display: block; }}
+        .config-panel {{ background: #e8f4fc; border: 2px solid #3498db; padding: 15px; border-radius: 8px; margin: 15px 0; display: flex; justify-content: space-around; flex-wrap: wrap; gap: 12px; text-align: center; font-weight: bold; }}
+        .config-group select {{ padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #3498db; background: white; cursor: pointer; margin-top: 5px; width: 100%; max-width: 250px; display: block; }}
 
-        .timer-banner {{ background: #27ae60; color: white; padding: 15px; border-radius: 8px; text-align: center; font-size: 17px; font-weight: bold; margin: 20px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-
-        .blueprint-container {{ background: #eef9f2; border: 2px solid #27ae60; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+        .timer-banner {{ background: #27ae60; color: white; padding: 12px; border-radius: 8px; text-align: center; font-size: 15px; font-weight: bold; margin: 15px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .blueprint-container {{ background: #eef9f2; border: 2px solid #27ae60; padding: 15px; border-radius: 8px; margin: 15px 0; }}
         .blueprint-container h3 {{ color: #27ae60; margin-top: 0; }}
 
-        .viewer-container {{ background: #1a1a1a; border: 2px solid #3498db; border-radius: 8px; margin: 25px 0; padding: 10px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }}
-        #webgl-container {{ width: 100%; height: 350px; border-radius: 6px; overflow: hidden; }}
-        .viewer-title {{ color: #fff; font-size: 15px; margin-bottom: 8px; font-weight: bold; }}
+        .viewer-container {{ background: #1a1a1a; border: 2px solid #3498db; border-radius: 8px; margin: 20px 0; padding: 8px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }}
+        #webgl-container {{ width: 100%; height: 280px; border-radius: 6px; touch-action: none; overflow: hidden; }}
+        .viewer-title {{ color: #fff; font-size: 14px; margin-bottom: 6px; font-weight: bold; }}
 
-        .part-container {{ background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }}
+        .part-container {{ background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin: 15px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }}
         .row-chart {{ display: flex; align-items: center; margin: 4px 0; flex-wrap: wrap; }}
-        .row-label {{ width: 110px; font-size: 13px; font-weight: bold; color: #555; }}
-        .stitch-cell {{ width: 16px; height: 16px; display: inline-block; margin: 1px; border: 1px solid #bbb; border-radius: 3px; }}
+        .row-label {{ width: 100px; font-size: 12px; font-weight: bold; color: #555; }}
+        .stitch-cell {{ width: 14px; height: 14px; display: inline-block; margin: 1px; border: 1px solid #bbb; border-radius: 2px; }}
         
-        .tapestry-tip {{ background: #fdf2e9; border: 1px solid #f39c12; padding: 10px 15px; border-radius: 5px; margin: 10px 0; font-size: 13px; color: #d35400; }}
+        .tapestry-tip {{ background: #fdf2e9; border: 1px solid #f39c12; padding: 10px; border-radius: 5px; margin: 10px 0; font-size: 12px; color: #d35400; }}
 
-        .color-widget {{ background: #eef2f7; border: 2px dashed #3498db; padding: 15px; border-radius: 8px; text-align: center; margin: 25px 0; }}
-        .color-widget input {{ padding: 8px; width: 260px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 15px; }}
+        .color-widget {{ background: #eef2f7; border: 2px dashed #3498db; padding: 12px; border-radius: 8px; text-align: center; margin: 20px 0; }}
+        .color-widget input {{ padding: 10px; width: 80%; max-width: 240px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 15px; }}
         
-        .no-print {{ text-align: center; margin: 20px 0; }}
-        .btn {{ background: #e74c3c; color: white; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 5px; display: inline-block; cursor: pointer; border: none; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-        .btn:hover {{ background: #c0392b; }}
+        .no-print {{ text-align: center; margin: 15px 0; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }}
+        .btn {{ background: #e74c3c; color: white; padding: 12px 18px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block; cursor: pointer; border: none; font-size: 14px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); -webkit-appearance: none; }}
+        .btn:active {{ transform: scale(0.98); }}
+        .btn-export {{ background: #2980b9; }}
+        
+        @media (min-width: 768px) {{
+            body {{ max-width: 900px; padding: 25px; }}
+            h1 {{ font-size: 28px; }}
+            #webgl-container {{ height: 350px; }}
+        }}
+
         @media print {{ .no-print, .color-widget, .viewer-container, .config-panel, .timer-banner {{ display: none; }} body {{ margin: 10px; background: white; }} }}
     </style>
 </head>
 <body>
     <div class="no-print">
-        <button class="btn" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer le Patron</button>
+        <button class="btn" onclick="window.print()">🖨️ PDF / Imprimer</button>
+        <button class="btn btn-export" onclick="exporterJSON()">📥 JSON</button>
+        <button class="btn btn-export" onclick="exporterCSV()">📊 CSV</button>
     </div>
     
-    <h1>🌟 Patron Global Amigurumi - Master Pro 🌟</h1>
+    <h1>🌟 Amigurumi Pro - Mobile & Tablette 🌟</h1>
     
     <div class="config-panel">
         <div class="config-group">
-            <label for="hookSize">🧶 Taille du Crochet :</label>
+            <label for="hookSize">🧶 Crochet :</label>
             <select id="hookSize" onchange="mettreAJourPatron()">
-                <option value="2.0">Crochet 2.0 mm (Mini)</option>
-                <option value="2.5">Crochet 2.5 mm (Fin)</option>
-                <option value="3.0">Crochet 3.0 mm (Standard fin)</option>
-                <option value="3.5" selected>Crochet 3.5 mm (Standard)</option>
-                <option value="4.0">Crochet 4.0 mm (Moyen)</option>
-                <option value="4.5">Crochet 4.5 mm (Large)</option>
-                <option value="5.0">Crochet 5.0 mm (Gros fil)</option>
+                <option value="2.0">Crochet 2.0 mm</option>
+                <option value="2.5">Crochet 2.5 mm</option>
+                <option value="3.0">Crochet 3.0 mm</option>
+                <option value="3.5" selected>Crochet 3.5 mm</option>
+                <option value="4.0">Crochet 4.0 mm</option>
+                <option value="4.5">Crochet 4.5 mm</option>
+                <option value="5.0">Crochet 5.0 mm</option>
             </select>
         </div>
         <div class="config-group">
-            <label for="yarnType">🧵 Type de Laine / Fil :</label>
+            <label for="yarnType">🧵 Fil / Laine :</label>
             <select id="yarnType" onchange="mettreAJourPatron()">
-                <option value="lace">Lace / Fingering (Très fin)</option>
-                <option value="sport" selected>Coton Sport / DK (Standard)</option>
-                <option value="worsted">Aran / Worsted (Épais)</option>
-                <option value="bulky">Bulky / Chunky (Très épais)</option>
-                <option value="velvet">Chenille / Velvet (Effet peluche)</option>
+                <option value="lace">Lace (Très fin)</option>
+                <option value="sport" selected>Coton Sport / DK</option>
+                <option value="worsted">Aran / Worsted</option>
+                <option value="bulky">Bulky (Épais)</option>
+                <option value="velvet">Chenille / Peluche</option>
             </select>
         </div>
         <div class="config-group">
-            <label for="speedLevel">⏱️ Vitesse de Crochet :</label>
+            <label for="speedLevel">⏱️ Vitesse :</label>
             <select id="speedLevel" onchange="mettreAJourPatron()">
-                <option value="12">Débutant (12s / maille)</option>
-                <option value="8" selected>Intermédiaire (8s / maille)</option>
-                <option value="5">Expert / Rapide (5s / maille)</option>
+                <option value="12">Débutant (12s/m)</option>
+                <option value="8" selected>Intermédiaire (8s/m)</option>
+                <option value="5">Expert (5s/m)</option>
             </select>
         </div>
     </div>
@@ -220,25 +257,24 @@ def compiler_master_document(parties_donnees, mesh):
         ⏱️ Temps de crochet estimé : Calcul en cours...
     </div>
 
-    <!-- Plan de Marquage et d'Épinglage 3D Dynamique -->
     <div class="blueprint-container">
-        <h3>📍 Plan d'Assemblage & Épinglage 3D Chirurgical</h3>
+        <h3>📍 Plan d'Assemblage & Épinglage 3D</h3>
         <ul id="blueprintList">
-            <li>Calcul des repères d'assemblage en cours...</li>
+            <li>Calcul des repères en cours...</li>
         </ul>
     </div>
 
     <div class="viewer-container">
-        <div class="viewer-title">🌐 Visualiseur 3D Interactif (Glissez pour pivoter, molette pour zoomer)</div>
+        <div class="viewer-title">🌐 Visualiseur 3D Tactile (Glissez avec un doigt pour pivoter, pincez pour zoomer)</div>
         <div id="webgl-container"></div>
     </div>
 
     <div class="color-widget">
-        <h3>🎨 Encyclopédie & Testeur RGB Universel</h3>
-        <p>Tapez un nom (ex: <i>rouge</i>, <i>beige</i>) ou un code RGB (ex: <i>234, 172, 121</i>) :</p>
+        <h3>🎨 Encyclopédie & Testeur RGB</h3>
+        <p style="font-size: 13px;">Tapez un nom (ex: <i>rouge</i>) ou RGB (ex: <i>234,172,121</i>) :</p>
         <input type="text" id="colorInput" placeholder="Ex: rouge ou 234,172,121">
-        <button class="btn" style="padding: 8px 15px; margin-left: 10px; background: #3498db;" onclick="chercherCouleur()">Rechercher</button>
-        <div id="colorResult" style="margin-top: 10px; font-weight: bold; font-size: 15px;"></div>
+        <button class="btn" style="padding: 8px 12px; margin-top: 8px; background: #3498db;" onclick="chercherCouleur()">Rechercher</button>
+        <div id="colorResult" style="margin-top: 8px; font-weight: bold; font-size: 14px;"></div>
     </div>
 
     <div id="contenu-patron"></div>
@@ -283,116 +319,174 @@ def compiler_master_document(parties_donnees, mesh):
                 }}
             }}
             if (maxConsecutif > 5) {{
-                return `💡 <b>Conseil Tapestry</b> : Séquence longue détectée (${{maxConsecutif}} mailles d'affilée). Utilisez la technique du <i>fil flottant sur l'envers</i> pour ne pas alourdir l'ouvrage.`;
+                return `💡 <b>Conseil Tapestry</b> : Séquence longue (${{maxConsecutif}} ms). Utilisez le <i>fil flottant sur l'envers</i>.`;
             }} else {{
-                return `💡 <b>Conseil Tapestry</b> : Alternance rapide. Emprisonnez (emportez) le fil inactif à l'intérieur des mailles.`;
+                return `💡 <b>Conseil Tapestry</b> : Alternance rapide. Emprisonnez le fil inactif.`;
             }}
         }}
 
         function mettreAJourPatron() {{
+            try {{
+                let hookSize = parseFloat(document.getElementById('hookSize').value);
+                let yarnVal = document.getElementById('yarnType').value;
+                let secondsPerStitch = parseFloat(document.getElementById('speedLevel').value);
+                
+                let yarnMultiplier = 1.0;
+                let nomLaineTexte = "Coton Sport / DK";
+                if(yarnVal === 'lace') {{ yarnMultiplier = 0.8; nomLaineTexte = "Lace / Fingering"; }}
+                else if(yarnVal === 'sport') {{ yarnMultiplier = 1.0; nomLaineTexte = "Coton Sport / DK"; }}
+                else if(yarnVal === 'worsted') {{ yarnMultiplier = 1.3; nomLaineTexte = "Aran / Worsted"; }}
+                else if(yarnVal === 'bulky') {{ yarnMultiplier = 1.6; nomLaineTexte = "Bulky / Chunky"; }}
+                else if(yarnVal === 'velvet') {{ yarnMultiplier = 2.0; nomLaineTexte = "Chenille / Velvet"; }}
+
+                let largeurMaille = (hookSize * 2.2) * (yarnMultiplier * 0.9); 
+                let hauteurCouche = (hookSize * 0.6) * yarnMultiplier;
+
+                let htmlFinal = "<h2>🗺️ Guide d'assemblage & Cartographie</h2><hr>";
+                let blueprintHTML = "";
+                let grandTotalMailles = 0;
+
+                if (!partiesData || partiesData.length === 0) {{
+                    document.getElementById('timerBanner').innerHTML = "⚠️ Aucune partie détectée.";
+                    return;
+                }}
+
+                partiesData.forEach(partie => {{
+                    let nbRangs = Math.max(4, Math.round(partie.hauteur_totale / hauteurCouche));
+                    let diametreMoyenMM = (partie.z_max - partie.z_min) * 0.8;
+                    if(diametreMoyenMM < 10) diametreMoyenMM = 20;
+
+                    let instructions = [];
+                    let grillesHTML = [];
+                    let dernierMailles = 0;
+                    let totalMaillesPartie = 0;
+
+                    for(let i = 0; i < nbRangs; i++) {{
+                        let facteurForme = Math.sin((i / nbRangs) * Math.PI);
+                        if(facteurForme < 0.2) facteurForme = 0.2;
+                        let nbMailles = Math.max(4, Math.round((diametreMoyenMM * facteurForme * Math.PI) / largeurMaille));
+                        totalMaillesPartie += nbMailles;
+
+                        let actionTexte = (i === 0) ? `Cercle magique de <b>${{nbMailles}} ms</b>` : genererInstructionOptimisee(dernierMailles, nbMailles);
+
+                        let couleurIndex = i % partie.tranches_couleurs.length;
+                        let paletteTranche = partie.tranches_couleurs[couleurIndex] || [["#3498db", "Blue"]];
+
+                        let rowChart = `<div class='row-chart'><span class='row-label'>R${{i+1}} (${{nbMailles}}m) :</span>`;
+                        for(let k = 0; k < nbMailles; k++) {{
+                            let colorInfo = paletteTranche[k % paletteTranche.length];
+                            let hexC = colorInfo[0];
+                            let nomF = colorInfo[1];
+                            rowChart += `<span class='stitch-cell' style='background-color: ${{hexC}};' title='${{nomF}}'></span>`;
+                        }}
+                        rowChart += `</div>`;
+                        grillesHTML.push(rowChart);
+
+                        instructions.push(`<li><b>R${{i+1}}</b> : ${{actionTexte}}</li>`);
+                        dernierMailles = nbMailles;
+                    }}
+
+                    grandTotalMailles += totalMaillesPartie;
+
+                    let hauteurEstimeeMM = nbRangs * hauteurCouche;
+                    let filEstimeMetres = (totalMaillesPartie * (hookSize * 4.5 * yarnMultiplier)) / 1000.0;
+                    let pelotes = Math.max(1, Math.ceil(filEstimeMetres / 75.0));
+                    let tapestryAdvice = analyserTapestrySequence(partie.tranches_couleurs[0]);
+
+                    let nomP = partie.nom.toLowerCase();
+                    if(nomP.includes('tete') || nomP.includes('head')) {{
+                        blueprintHTML += `<li><b>TÊTE</b> : À fixer sur le sommet du CORPS entre les rangs supérieurs.</li>`;
+                    }} else if(nomP.includes('corps') || nomP.includes('body')) {{
+                        blueprintHTML += `<li><b>CORPS</b> : Base centrale. Insérer armature et ouate.</li>`;
+                    }} else if(nomP.includes('jambe') || nomP.includes('leg')) {{
+                        blueprintHTML += `<li><b>JAMBES</b> : À positionner symétriquement de part et d'autre.</li>`;
+                    }} else if(nomP.includes('chapeau') || nomP.includes('casquette')) {{
+                        blueprintHTML += `<li><b>ACCESSOIRE</b> : À poser et coudre sur le sommet de la TÊTE.</li>`;
+                    }} else {{
+                        blueprintHTML += `<li><b>${{partie.nom.toUpperCase()}}</b> : À coudre sur la zone latérale.</li>`;
+                    }}
+
+                    htmlFinal += `<div class='part-container'>`;
+                    htmlFinal += `<h2>🧶 Partie : ${{partie.nom.toUpperCase()}}</h2>`;
+                    htmlFinal += `<h3>📋 Spécifications (${{hookSize}}mm | ${{nomLaineTexte}}) :</h3>`;
+                    htmlFinal += `<ul>`;
+                    htmlFinal += `<li><b>Fil recommandé</b> : 🎨 ${{partie.couleur_partie}}</li>`;
+                    htmlFinal += `<li><b>Hauteur estimée</b> : ${{hauteurEstimeeMM.toFixed(1)}} mm (${{(hauteurEstimeeMM/10.0).toFixed(1)}} cm)</li>`;
+                    htmlFinal += `<li><b>Fil estimé</b> : ~${{filEstimeMetres.toFixed(1)}}m (~${{pelotes}} pelote(s)) | <b>Ouate</b> : ~${{partie.poids_ouate.toFixed(1)}}g</li>`;
+                    if(partie.armature) htmlFinal += `<li><b>Armature</b> : ⚠️ Fil de fer conseillé.</li>`;
+                    htmlFinal += `</ul>`;
+                    htmlFinal += `<div class='tapestry-tip'>${{tapestryAdvice}}</div>`;
+                    htmlFinal += `<div class='jacquard-container'><h4>📊 Grille Visuelle (${{partie.nom.toUpperCase()}})</h4>` + grillesHTML.join('') + `</div>`;
+                    htmlFinal += `<h3>🧵 Instructions :</h3><ul>` + instructions.join('') + `</ul>`;
+                    htmlFinal += `</div>`;
+                }});
+
+                document.getElementById('blueprintList').innerHTML = blueprintHTML;
+
+                let totalSeconds = grandTotalMailles * secondsPerStitch;
+                let totalHours = Math.floor(totalSeconds / 3600);
+                let totalMinutes = Math.round((totalSeconds % 3600) / 60);
+                
+                let tempsTexte = totalHours > 0 ? `${{totalHours}}h ${{totalMinutes}}min` : `${{totalMinutes}} minutes`;
+                document.getElementById('timerBanner').innerHTML = `⏱️ Temps estimé (~${{grandTotalMailles}} mailles) : <b>${{tempsTexte}} de travail</b>`;
+
+                document.getElementById('contenu-patron').innerHTML = htmlFinal;
+            }} catch (err) {{
+                console.error("Erreur attrapée dans mettreAJourPatron:", err);
+                document.getElementById('timerBanner').innerHTML = "⚠️ Erreur : " + err.message;
+            }}
+        }}
+
+        function exporterJSON() {{
+            let configExport = {{
+                hookSize: document.getElementById('hookSize').value,
+                yarnType: document.getElementById('yarnType').value,
+                speedLevel: document.getElementById('speedLevel').value,
+                parties: partiesData
+            }};
+            let blob = new Blob([JSON.stringify(configExport, null, 2)], {{type: 'application/json'}});
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement('a');
+            a.href = url;
+            a.download = 'patron_amigurumi_donnees.json';
+            a.click();
+        }}
+
+        function exporterCSV() {{
+            let csvContent = "Partie,Couleur_Principale,Hauteur_cm,Fil_Estime_m,Ouate_g,Armature_Conseillee\\n";
             let hookSize = parseFloat(document.getElementById('hookSize').value);
             let yarnVal = document.getElementById('yarnType').value;
-            let secondsPerStitch = parseFloat(document.getElementById('speedLevel').value);
-            
-            let yarnMultiplier = 1.0;
-            let nomLaineTexte = "Coton Sport / DK";
-            if(yarnVal === 'lace') {{ yarnMultiplier = 0.8; nomLaineTexte = "Lace / Fingering"; }}
-            else if(yarnVal === 'sport') {{ yarnMultiplier = 1.0; nomLaineTexte = "Coton Sport / DK"; }}
-            else if(yarnVal === 'worsted') {{ yarnMultiplier = 1.3; nomLaineTexte = "Aran / Worsted"; }}
-            else if(yarnVal === 'bulky') {{ yarnMultiplier = 1.6; nomLaineTexte = "Bulky / Chunky"; }}
-            else if(yarnVal === 'velvet') {{ yarnMultiplier = 2.0; nomLaineTexte = "Chenille / Velvet (Peluche)"; }}
-
-            let largeurMaille = (hookSize * 2.2) * (yarnMultiplier * 0.9); 
+            let yarnMultiplier = yarnVal === 'lace' ? 0.8 : (yarnVal === 'sport' ? 1.0 : (yarnVal === 'worsted' ? 1.3 : (yarnVal === 'bulky' ? 1.6 : 2.0)));
             let hauteurCouche = (hookSize * 0.6) * yarnMultiplier;
 
-            let htmlFinal = "<h2>🗺️ Guide d'assemblage et de cartographie spatiale</h2><hr>";
-            let blueprintHTML = "";
-            let grandTotalMailles = 0;
-
-            partiesData.forEach(partie => {{
-                let nbRangs = Math.max(4, Math.round(partie.hauteur_totale / hauteurCouche));
-                let diametreMoyenMM = (partie.z_max - partie.z_min) * 0.8;
+            partiesData.forEach(p => {{
+                let nbRangs = Math.max(4, Math.round(p.hauteur_totale / hauteurCouche));
+                let diametreMoyenMM = (p.z_max - p.z_min) * 0.8;
                 if(diametreMoyenMM < 10) diametreMoyenMM = 20;
-
-                let instructions = [];
-                let grillesHTML = [];
-                let dernierMailles = 0;
+                let largeurMaille = (hookSize * 2.2) * (yarnMultiplier * 0.9);
                 let totalMaillesPartie = 0;
-
                 for(let i = 0; i < nbRangs; i++) {{
                     let facteurForme = Math.sin((i / nbRangs) * Math.PI);
                     if(facteurForme < 0.2) facteurForme = 0.2;
-                    let nbMailles = Math.max(4, Math.round((diametreMoyenMM * facteurForme * Math.PI) / largeurMaille));
-                    totalMaillesPartie += nbMailles;
-
-                    let actionTexte = (i === 0) ? `Cercle magique de <b>${{nbMailles}} ms</b>` : genererInstructionOptimisee(dernierMailles, nbMailles);
-
-                    let couleurIndex = i % partie.tranches_couleurs.length;
-                    let paletteTranche = partie.tranches_couleurs[couleurIndex] || [["#3498db", "Blue"]];
-
-                    let rowChart = `<div class='row-chart'><span class='row-label'>R${{i+1}} (${{nbMailles}}m) :</span>`;
-                    for(let k = 0; k < nbMailles; k++) {{
-                        let colorInfo = paletteTranche[k % paletteTranche.length];
-                        let hexC = colorInfo[0];
-                        let nomF = colorInfo[1];
-                        rowChart += `<span class='stitch-cell' style='background-color: ${{hexC}};' title='${{nomF}}'></span>`;
-                    }}
-                    rowChart += `</div>`;
-                    grillesHTML.push(rowChart);
-
-                    instructions.push(`<li><b>R${{i+1}}</b> : ${{actionTexte}}</li>`);
-                    dernierMailles = nbMailles;
+                    totalMaillesPartie += Math.max(4, Math.round((diametreMoyenMM * facteurForme * Math.PI) / largeurMaille));
                 }}
-
-                grandTotalMailles += totalMaillesPartie;
-
                 let hauteurEstimeeMM = nbRangs * hauteurCouche;
-                let filEstimeMetres = (totalMaillesPartie * (hookSize * 4.5 * yarnMultiplier)) / 1000.0;
-                let pelotes = Math.max(1, Math.ceil(filEstimeMetres / 75.0));
-                let tapestryAdvice = analyserTapestrySequence(partie.tranches_couleurs[0]);
-
-                // Génération intelligente du plan de marquage selon la partie
-                let nomP = partie.nom.toLowerCase();
-                if(nomP.includes('tete') || nomP.includes('head')) {{
-                    blueprintHTML += `<li><b>TÊTE</b> : À fixer sur le sommet du CORPS entre les rangs supérieurs (épingler solidement avant couture circulaire).</li>`;
-                }} else if(nomP.includes('corps') || nomP.includes('body')) {{
-                    blueprintHTML += `<li><b>CORPS</b> : Base centrale de l'amigurumi. Insérer l'armature et le rembourrage avant de fermer le sommet.</li>`;
-                }} else if(nomP.includes('jambe') || nomP.includes('leg')) {{
-                    blueprintHTML += `<li><b>JAMBES / MEMBRES</b> : À positionner symétriquement de part et d'autre de la base du CORPS (aligner horizontalement avec des épingles).</li>`;
-                }} else if(nomP.includes('chapeau') || nomP.includes('casquette')) {{
-                    blueprintHTML += `<li><b>ACCESSOIRE (Chapeau)</b> : À poser et coudre en couronne sur le sommet de la TÊTE au niveau des 3 derniers rangs.</li>`;
-                }} else {{
-                    blueprintHTML += `<li><b>${{partie.nom.toUpperCase()}}</b> : À coudre sur la zone avant/latérale selon la symétrie 3D.</li>`;
-                }}
-
-                htmlFinal += `<div class='part-container'>`;
-                htmlFinal += `<h2>🧶 Partie : ${{partie.nom.toUpperCase()}}</h2>`;
-                htmlFinal += `<h3>📋 Spécifications & Fournitures (Crochet ${{hookSize}}mm | ${{nomLaineTexte}}) :</h3>`;
-                htmlFinal += `<ul>`;
-                htmlFinal += `<li><b>Fil recommandé</b> : 🎨 ${{partie.couleur_partie}}</li>`;
-                htmlFinal += `<li><b>Hauteur estimée</b> : ${{hauteurEstimeeMM.toFixed(1)}} mm (${{(hauteurEstimeeMM/10.0).toFixed(1)}} cm)</li>`;
-                htmlFinal += `<li><b>Fil estimé</b> : ~${{filEstimeMetres.toFixed(1)}}m (~${{pelotes}} pelote(s)) | <b>Ouate</b> : ~${{partie.poids_ouate.toFixed(1)}}g</li>`;
-                if(partie.armature) htmlFinal += `<li><b>Armature</b> : ⚠️ Fil de fer conseillé.</li>`;
-                htmlFinal += `</ul>`;
-                htmlFinal += `<div class='tapestry-tip'>${{tapestryAdvice}}</div>`;
-                htmlFinal += `<div class='jacquard-container'><h4>📊 Grille Visuelle & Références Fils (${{partie.nom.toUpperCase()}})</h4>` + grillesHTML.join('') + `</div>`;
-                htmlFinal += `<h3>🧵 Instructions et Grille Jacquard :</h3><ul>` + instructions.join('') + `</ul>`;
-                htmlFinal += `</div>`;
+                let filMetres = (totalMaillesPartie * (hookSize * 4.5 * yarnMultiplier)) / 1000.0;
+                csvContent += `"${{p.nom}}","${{p.couleur_partie}}",${{(hauteurEstimeeMM/10.0).toFixed(1)}},${{filMetres.toFixed(1)}},${{p.poids_ouate.toFixed(1)}},${{p.armature ? "Oui" : "Non"}}\\n`;
             }});
 
-            document.getElementById('blueprintList').innerHTML = blueprintHTML;
-
-            let totalSeconds = grandTotalMailles * secondsPerStitch;
-            let totalHours = Math.floor(totalSeconds / 3600);
-            let totalMinutes = Math.round((totalSeconds % 3600) / 60);
-            
-            let tempsTexte = totalHours > 0 ? `${{totalHours}}h ${{totalMinutes}}min` : `${{totalMinutes}} minutes`;
-            document.getElementById('timerBanner').innerHTML = `⏱️ Temps de crochet estimé (~${{grandTotalMailles}} mailles) : <b>${{tempsTexte}} de travail</b>`;
-
-            document.getElementById('contenu-patron').innerHTML = htmlFinal;
+            let blob = new Blob([csvContent], {{type: 'text/csv;charset=utf-8;'}});
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement('a');
+            a.href = url;
+            a.download = 'recapitulatif_fournitures_amigurumi.csv';
+            a.click();
         }}
 
         function init3DViewer() {{
+            if (typeof THREE === 'undefined') {{
+                throw new Error("Three.js non chargé");
+            }}
             const container = document.getElementById('webgl-container');
             const scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a1a);
@@ -406,6 +500,7 @@ def compiler_master_document(parties_donnees, mesh):
 
             const controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
+            controls.enableZoom = true;
 
             scene.add(new THREE.AmbientLight(0xffffff, 0.7));
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -451,26 +546,31 @@ def compiler_master_document(parties_donnees, mesh):
         function chercherCouleur() {{
             let val = document.getElementById('colorInput').value.toLowerCase().trim();
             let resDiv = document.getElementById('colorResult');
-            if(!val) {{ resDiv.innerHTML = "Entrez un nom ou des valeurs RGB."; return; }}
+            if(!val) {{ resDiv.innerHTML = "Entrez un nom ou RGB."; return; }}
             if(val.includes(',')) {{
                 let rgb = val.split(',').map(Number);
                 if(rgb.length === 3 && !rgb.some(isNaN)) {{
                     let hex = `rgb(${{rgb[0]}},${{rgb[1]}},${{rgb[2]}})`;
-                    resDiv.innerHTML = `<span style="display:inline-block; width:20px; height:20px; background:${{hex}}; vertical-align:middle; border:1px solid #000; border-radius:3px; margin-right:8px;"></span> Nuance RGB(${{rgb.join(',')}})`;
+                    resDiv.innerHTML = `<span style="display:inline-block; width:16px; height:16px; background:${{hex}}; vertical-align:middle; border:1px solid #000; border-radius:3px; margin-right:6px;"></span> RGB(${{rgb.join(',')}})`;
                     return;
                 }}
             }}
             let f = encyclopedie.find(c => c.nom.includes(val));
             if(f) {{
-                resDiv.innerHTML = `<span style="display:inline-block; width:20px; height:20px; background:${{f.hex}}; vertical-align:middle; border:1px solid #000; border-radius:3px; margin-right:8px;"></span> ${{f.nom.toUpperCase()}} - RGB(${{f.rgb.join(',')}})`;
+                resDiv.innerHTML = `<span style="display:inline-block; width:16px; height:16px; background:${{f.hex}}; vertical-align:middle; border:1px solid #000; border-radius:3px; margin-right:6px;"></span> ${{f.nom.toUpperCase()}} - RGB(${{f.rgb.join(',')}})`;
             }} else {{
                 resDiv.innerHTML = "Couleur introuvable.";
             }}
         }}
 
         window.onload = function() {{
-            init3DViewer();
             mettreAJourPatron();
+            try {{
+                init3DViewer();
+            }} catch (e) {{
+                console.warn("Visualiseur 3D indisponible :", e);
+                document.getElementById('webgl-container').innerHTML = "<p style='color:#aaa; padding-top:110px; font-size:13px;'>Aperçu 3D non disponible hors-ligne.</p>";
+            }}
         }};
     </script>
 </body>
@@ -478,7 +578,7 @@ def compiler_master_document(parties_donnees, mesh):
 """
     with open("patron_global_ultime.html", "w", encoding="utf-8") as f:
         f.write(html_content)
-    print("[Succès] Export HTML avec plan de marquage et épinglage 3D généré !")
+    print("[Succès] Application PWA mobile/tablette (avec manifest.json & responsive tactile) générée avec succès !")
 
 def extraire_tranches_mesh_avancees(sub_mesh):
     bounds = sub_mesh.bounds
@@ -495,7 +595,7 @@ def extraire_tranches_mesh_avancees(sub_mesh):
     return perimetres, hauteurs
 
 def scanner_details_et_zones(mesh):
-    print(f"\n--- Scanner intelligent & Plan d'Épinglage 3D ---")
+    print(f"\n--- Scanner intelligent & Station PWA Mobile ---")
     if not mesh.is_watertight:
         trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
