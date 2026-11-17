@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 import subprocess
 import streamlit as st
 import streamlit.components.v1 as components
@@ -10,11 +11,22 @@ import plotly.graph_objects as go
 from PIL import Image
 from rembg import remove
 from huggingface_hub import hf_hub_download
+from skimage.measure import marching_cubes as skimage_marching_cubes
 
 st.set_page_config(page_title="Patron Amigurumi Pro 3D", page_icon="🐉", layout="wide")
 st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
 
-# Téléchargement automatique du code source TripoSR s'il n'est pas encore présent
+# Création du module relais torchmcubes sur CPU (évite la compilation C++/CUDA)
+if "torchmcubes" not in sys.modules:
+    fake_torchmcubes = types.ModuleType("torchmcubes")
+    def marching_cubes(vol, thresh):
+        vol_np = vol.detach().cpu().numpy() if torch.is_tensor(vol) else np.asarray(vol)
+        verts, faces, _, _ = skimage_marching_cubes(vol_np, level=float(thresh))
+        return torch.from_numpy(verts.copy()).float(), torch.from_numpy(faces.copy()).long()
+    fake_torchmcubes.marching_cubes = marching_cubes
+    sys.modules["torchmcubes"] = fake_torchmcubes
+
+# Téléchargement automatique du code source TripoSR
 if not os.path.exists("TripoSR"):
     subprocess.run(["git", "clone", "https://github.com/VAST-AI-Research/TripoSR.git"], check=True)
 if os.path.abspath("TripoSR") not in sys.path:
