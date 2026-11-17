@@ -14,43 +14,29 @@ st.title("🐉 Générateur Universel 2D → 3D & Patron Amigurumi")
 if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
 
-def generer_via_cloud_robuste(chemin_image):
-    # 1. Tentative avec un espace miroir actif et hautement disponible
-    try:
-        client = Client("camenduru/TripoSR")
-        resultat = client.predict(
-            input_image=handle_file(chemin_image),
-            api_name="/run"
-        )
-        chemin_glb = resultat[0] if isinstance(resultat, (list, tuple)) else resultat
-        if chemin_glb and os.path.exists(chemin_glb):
-            return chemin_glb
-    except Exception:
-        pass
-
-    # 2. Tentative avec stabilityai/TripoSR officiel
-    try:
-        client = Client("stabilityai/TripoSR")
-        img_sans_fond = client.predict(handle_file(chemin_image), api_name="/preprocess")
-        resultat_3d = client.predict(
-            handle_file(img_sans_fond),
-            0.85,
-            192,
-            api_name="/generate"
-        )
-        chemin_glb = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_glb if 'resultat_glb' in locals() else resultat_3d
-        if chemin_glb and os.path.exists(chemin_glb):
-            return chemin_glb
-    except Exception:
-        pass
-
-    raise Exception("Les serveurs 3D distants sont temporairement en maintenance. Réessaie dans quelques secondes.")
+def generer_via_cloud_direct(chemin_image):
+    # Connexion directe au client haute performance
+    client = Client("stabilityai/TripoSR")
+    img_sans_fond = client.predict(
+        input_image=handle_file(chemin_image),
+        api_name="/preprocess"
+    )
+    resultat_3d = client.predict(
+        image=handle_file(img_sans_fond),
+        foreground_ratio=0.85,
+        mc_resolution=256,
+        api_name="/generate"
+    )
+    chemin_glb = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
+    if chemin_glb and os.path.exists(chemin_glb):
+        return chemin_glb
+    raise Exception("Le serveur n'a pas renvoyé de fichier 3D valide.")
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
     fichiers_images = st.file_uploader(
-        "📸 1. Importe ta photo 2D (PNG, JPG)",
+        "📸 1. Importe ta photo de l'amigurumi (PNG, JPG)",
         type=["png", "jpg", "jpeg"],
         accept_multiple_files=True
     )
@@ -64,13 +50,13 @@ with col1:
     taille_mm = st.slider("📏 Hauteur finale (mm)", 50, 300, 150, 10)
 
     if fichiers_images and st.button("✨ 1. Générer le modèle 3D précis", type="primary", use_container_width=True):
-        with st.spinner("🧠 Analyse de la photo et sculpture 3D haute fidélité en cours (30s)..."):
+        with st.spinner("🧠 Conversion IA de la photo en 3D haute fidélité (20-30s)..."):
             chemin_tmp = "input_temp.png"
             with open(chemin_tmp, "wb") as out_f:
                 out_f.write(fichiers_images[0].getbuffer())
 
             try:
-                chemin_mesh = generer_via_cloud_robuste(chemin_tmp)
+                chemin_mesh = generer_via_cloud_direct(chemin_tmp)
                 mesh_3d = trimesh.load(chemin_mesh, force="mesh")
 
                 morceaux = mesh_3d.split(only_watertight=False)
@@ -97,9 +83,9 @@ with col1:
 
                 mesh_3d.export("mario_ia_genere.obj")
                 st.session_state.mesh_valide = True
-                st.success("🎉 Modèle 3D réaliste généré avec succès à partir de ta photo !")
+                st.success("🎉 Modèle 3D ultra-précis généré avec succès !")
             except Exception as e:
-                st.error(f"{e}")
+                st.error(f"Le serveur est en cours de réveil. Patiente 10 secondes et relance : {e}")
 
 with col2:
     if st.session_state.mesh_valide and os.path.exists("mario_ia_genere.obj"):
