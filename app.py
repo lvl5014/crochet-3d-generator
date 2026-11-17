@@ -15,6 +15,20 @@ if "mesh_valide" not in st.session_state:
     st.session_state.mesh_valide = False
 
 def generer_via_cloud(chemin_image):
+    # 1. Essai avec le miroir camenduru/TripoSR
+    try:
+        client = Client("camenduru/TripoSR")
+        resultat = client.predict(
+            input_image=handle_file(chemin_image),
+            api_name="/run"
+        )
+        chemin_glb = resultat[0] if isinstance(resultat, (list, tuple)) else resultat
+        if chemin_glb and os.path.exists(chemin_glb):
+            return chemin_glb
+    except Exception:
+        pass
+
+    # 2. Secours avec le serveur officiel stabilityai/TripoSR
     client = Client("stabilityai/TripoSR")
     img_sans_fond = client.predict(handle_file(chemin_image), api_name="/preprocess")
     resultat_3d = client.predict(
@@ -26,7 +40,8 @@ def generer_via_cloud(chemin_image):
     chemin_glb = resultat_3d[0] if isinstance(resultat_3d, (list, tuple)) else resultat_3d
     if chemin_glb and os.path.exists(chemin_glb):
         return chemin_glb
-    raise Exception("Le modèle 3D n'a pas pu être généré par le serveur.")
+        
+    raise Exception("Tous les serveurs 3D sont temporairement surchargés.")
 
 col1, col2 = st.columns([1, 1])
 
