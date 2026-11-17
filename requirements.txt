@@ -12,3 +12,4 @@ scikit-image
 plotly
 pillow
 imageio
+git+https://github.com/tatsy/torchmcubes.git
